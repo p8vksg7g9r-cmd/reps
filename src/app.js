@@ -13,7 +13,7 @@ import { ManageExercisesView } from "./views/manage-exercises.js";
 
 // Bumped on every shipped change so the user can verify on the Profile screen
 // which build is actually running on their device.
-export const APP_VERSION = "v0.5";
+export const APP_VERSION = "v0.6";
 
 async function boot() {
   await seedIfEmpty(STARTER_EXERCISES);

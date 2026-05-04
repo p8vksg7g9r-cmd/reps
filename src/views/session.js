@@ -185,6 +185,30 @@ function lockField(fieldEl, stepperEl) {
   }
 }
 
+/** Inline error label that lives next to the Start button. Toggled via show/hide. */
+function makeStartError() {
+  const el = h("p", {
+    class: "body-s hidden",
+    style: "color: var(--terracotta); margin: 0 0 8px; text-align:center; font-weight:600"
+  }, "");
+  return {
+    el,
+    show(text) { el.textContent = text; el.classList.remove("hidden"); },
+    hide() { el.classList.add("hidden"); }
+  };
+}
+
+/** Read the current weight from both the bound state and the live input element
+ *  (the bound state may be stale if the user typed without blurring). */
+function currentWeightValue(stateRef, stepperEl) {
+  const inputEl = stepperEl?.querySelector("input");
+  if (inputEl && inputEl.value !== "") {
+    const parsed = Number(inputEl.value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return stateRef.value;
+}
+
 /* ----------------------------------------------------- standard */
 
 function renderStandard({ ex, lastAvg, root }) {
@@ -194,12 +218,18 @@ function renderStandard({ ex, lastAvg, root }) {
   const engine = makeIntervalEngine(phases);
 
   let sessionId = null;
-  const weight = { value: ex.bodyweight ? 0 : (ex.workingWeight || 0) };
+  const weight = { value: ex.bodyweight ? 0 : null };  // blank — user enters from scratch
   const setIds = new Map();
 
   const indicator = makeSetIndicator(`Set 1 of ${ex.rounds} · ready`, lastAvg);
-  const weightStepper = ex.bodyweight ? null : stepper({ value: weight.value, step: 1, onChange: (n) => weight.value = n });
+  const weightStepper = ex.bodyweight ? null : stepper({
+    value: "",                                       // empty by default
+    step: 1,
+    placeholder: "—",
+    onChange: (n) => weight.value = n
+  });
   const weightFieldEl = ex.bodyweight ? null : field("Weight (kg)", weightStepper);
+  const startError = makeStartError();
   const bodyweightBadge = ex.bodyweight ? h("div", { class: "card card-tight body-s row", style: "justify-content:center; gap:8px" }, [
     h("span", { class: "badge badge-brass" }, "Bodyweight"),
     h("span", { style: "color: var(--ink-mute)" }, "no external load")
@@ -216,6 +246,16 @@ function renderStandard({ ex, lastAvg, root }) {
   } }, "Finish & save");
 
   startBtn.addEventListener("click", async () => {
+    if (!ex.bodyweight) {
+      const w = currentWeightValue(weight, weightStepper);
+      if (w == null || !(w > 0)) {
+        startError.show("Enter a weight before starting.");
+        weightStepper?.querySelector("input")?.focus();
+        return;
+      }
+      weight.value = w;
+    }
+    startError.hide();
     sessionId = await startSession(ex.id);
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     unlockAudio();
@@ -296,6 +336,7 @@ function renderStandard({ ex, lastAvg, root }) {
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(repsPanel.el);
   root.appendChild(h("div", { style: "height:24px" }));
+  root.appendChild(startError.el);
   root.appendChild(startBtn);
   root.appendChild(skipBtn);
   root.appendChild(finishBtn);
@@ -312,12 +353,18 @@ function renderBilateral({ ex, lastAvg, root }) {
   const engine = makeIntervalEngine(phases);
 
   let sessionId = null;
-  const weight = { value: ex.bodyweight ? 0 : (ex.workingWeight || 0) };
+  const weight = { value: ex.bodyweight ? 0 : null };
   const setIds = new Map();
 
   const indicator = makeSetIndicator("Round 1 of 3 · ready", lastAvg);
-  const weightStepper = ex.bodyweight ? null : stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
+  const weightStepper = ex.bodyweight ? null : stepper({
+    value: "",
+    step: 0.5,
+    placeholder: "—",
+    onChange: (n) => weight.value = n
+  });
   const weightFieldEl = ex.bodyweight ? null : field("Weight per side (kg)", weightStepper);
+  const startError = makeStartError();
   const bodyweightBadge = ex.bodyweight ? h("div", { class: "card card-tight body-s row", style: "justify-content:center; gap:8px" }, [
     h("span", { class: "badge badge-brass" }, "Bodyweight"),
     h("span", { style: "color: var(--ink-mute)" }, "no external load")
@@ -334,6 +381,16 @@ function renderBilateral({ ex, lastAvg, root }) {
   } }, "Finish & save");
 
   startBtn.addEventListener("click", async () => {
+    if (!ex.bodyweight) {
+      const w = currentWeightValue(weight, weightStepper);
+      if (w == null || !(w > 0)) {
+        startError.show("Enter a weight before starting.");
+        weightStepper?.querySelector("input")?.focus();
+        return;
+      }
+      weight.value = w;
+    }
+    startError.hide();
     sessionId = await startSession(ex.id);
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     unlockAudio();
@@ -413,6 +470,7 @@ function renderBilateral({ ex, lastAvg, root }) {
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(repsPanel.el);
   root.appendChild(h("div", { style: "height:24px" }));
+  root.appendChild(startError.el);
   root.appendChild(startBtn);
   root.appendChild(skipBtn);
   root.appendChild(finishBtn);
@@ -429,13 +487,19 @@ function renderContinuous({ ex, lastAvg, root }) {
   const engine = makeIntervalEngine(phases);
 
   let sessionId = null;
-  const weight = { value: ex.bodyweight ? 0 : (ex.workingWeight || 0) };
+  const weight = { value: ex.bodyweight ? 0 : null };
   const tap = makeTapCounter();
   const tapWrap = h("div", { class: "hidden" }, [tap.el, h("p", { class: "tap-hint" }, "Tap to count · long-press to undo")]);
 
   const indicator = makeSetIndicator("10-minute block · ready", lastAvg);
-  const weightStepper = ex.bodyweight ? null : stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
+  const weightStepper = ex.bodyweight ? null : stepper({
+    value: "",
+    step: 0.5,
+    placeholder: "—",
+    onChange: (n) => weight.value = n
+  });
   const weightFieldEl = ex.bodyweight ? null : field("Weight (kg)", weightStepper);
+  const startError = makeStartError();
   const bodyweightBadge = ex.bodyweight ? h("div", { class: "card card-tight body-s row", style: "justify-content:center; gap:8px" }, [
     h("span", { class: "badge badge-brass" }, "Bodyweight"),
     h("span", { style: "color: var(--ink-mute)" }, "no external load")
@@ -455,6 +519,16 @@ function renderContinuous({ ex, lastAvg, root }) {
   } }, "Finish & save");
 
   startBtn.addEventListener("click", async () => {
+    if (!ex.bodyweight) {
+      const w = currentWeightValue(weight, weightStepper);
+      if (w == null || !(w > 0)) {
+        startError.show("Enter a weight before starting.");
+        weightStepper?.querySelector("input")?.focus();
+        return;
+      }
+      weight.value = w;
+    }
+    startError.hide();
     sessionId = await startSession(ex.id);
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     unlockAudio();
@@ -482,6 +556,7 @@ function renderContinuous({ ex, lastAvg, root }) {
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(tapWrap);
   root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(startError.el);
   root.appendChild(startBtn);
   root.appendChild(skipBtn);
   root.appendChild(finishBtn);

@@ -21,6 +21,15 @@ button, input, select, textarea {
   font: inherit;
   color: inherit;
 }
+/* Suppress the 350ms double-tap zoom delay on tappable elements and prevent
+   iOS from auto-zooming when an input is focused. Inputs in this app already
+   render at 16px+ which is the iOS auto-zoom threshold. */
+button, input, select, textarea, a, label, .toggle-bw, .tap-button {
+  touch-action: manipulation;
+}
+input, select, textarea {
+  font-size: 16px;
+}
 button { background: none; border: 0; padding: 0; cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 img { display: block; max-width: 100%; }

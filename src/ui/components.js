@@ -60,21 +60,54 @@ export function stepper({ value, step = 1, min = 0, onChange, placeholder = "" }
   const input = h("input", { type: "number", value: initial, inputmode: "decimal", placeholder });
   const dec = h("button", { type: "button", "aria-label": "Decrease" }, "−");
   const inc = h("button", { type: "button", "aria-label": "Increase" }, "+");
+
   function commit(n) {
     if (Number.isNaN(n)) n = min;
     if (n < min) n = min;
+    // Round trailing float noise that builds up after many +0.5 increments.
+    n = Math.round(n * 100) / 100;
     input.value = String(n);
     onChange?.(n);
   }
-  dec.addEventListener("click", () => commit(Number(input.value || 0) - step));
-  inc.addEventListener("click", () => commit(Number(input.value || 0) + step));
+
+  // Long-press repeat: tap = single increment, hold = burst after 400ms.
+  function attachRepeat(btn, delta) {
+    let initialDelay = null;
+    let interval = null;
+    function trigger() { commit(Number(input.value || 0) + delta); }
+    function stop() {
+      if (initialDelay) { clearTimeout(initialDelay); initialDelay = null; }
+      if (interval) { clearInterval(interval); interval = null; }
+    }
+    btn.addEventListener("pointerdown", (e) => {
+      if (btn.disabled) return;
+      e.preventDefault();           // suppress focus + iOS double-tap zoom
+      try { btn.setPointerCapture(e.pointerId); } catch {}
+      trigger();
+      initialDelay = setTimeout(() => {
+        interval = setInterval(trigger, 80);
+      }, 400);
+    });
+    btn.addEventListener("pointerup", stop);
+    btn.addEventListener("pointerleave", stop);
+    btn.addEventListener("pointercancel", stop);
+    btn.addEventListener("contextmenu", (e) => e.preventDefault());
+  }
+  attachRepeat(dec, -step);
+  attachRepeat(inc, step);
+
+  // Fire onChange on every keystroke so validators reading state see the
+  // current value without waiting for blur.
+  input.addEventListener("input", () => {
+    if (input.value === "") { onChange?.(null); return; }
+    const n = Number(input.value);
+    if (!Number.isNaN(n)) onChange?.(n);
+  });
   input.addEventListener("change", () => {
     if (input.value === "") { onChange?.(null); return; }
     commit(Number(input.value));
   });
-  input.addEventListener("input", () => {
-    if (input.value === "") onChange?.(null);
-  });
+
   return h("div", { class: "stepper" }, [dec, input, inc]);
 }
 
