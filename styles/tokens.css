@@ -1,0 +1,47 @@
+/* REPS — locked design tokens. Do not redefine these values inline. */
+:root {
+  /* Colors */
+  --navy: #0f2340;
+  --navy-deep: #0a1a30;
+  --terracotta: #d97a4f;
+  --brass: #c8a155;
+  --amber: #e8a96c;
+  --sand: #f0ebe1;
+  --paper: #faf6ec;
+  --sage: #5b8a72;
+
+  --ink: var(--navy);
+  --ink-soft: rgba(15, 35, 64, 0.72);
+  --ink-mute: rgba(15, 35, 64, 0.5);
+  --hairline: rgba(15, 35, 64, 0.12);
+  --shadow-1: 0 1px 2px rgba(10, 26, 48, 0.06), 0 4px 12px rgba(10, 26, 48, 0.04);
+  --shadow-2: 0 2px 6px rgba(10, 26, 48, 0.08), 0 12px 32px rgba(10, 26, 48, 0.08);
+
+  /* Typography */
+  --font-display: "Archivo", system-ui, -apple-system, sans-serif;
+  --font-body: "Archivo", system-ui, -apple-system, sans-serif;
+  --font-eyebrow: "Archivo Narrow", "Archivo", system-ui, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Spacing — 4pt grid */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+
+  /* Radii */
+  --r-sm: 6px;
+  --r-md: 12px;
+  --r-lg: 20px;
+  --r-pill: 999px;
+
+  /* Layout */
+  --max-w: 480px;
+  --tabbar-h: 64px;
+  --safe-bottom: env(safe-area-inset-bottom, 0);
+  --safe-top: env(safe-area-inset-top, 0);
+}
