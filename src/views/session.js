@@ -263,6 +263,9 @@ function renderStandard({ ex, lastAvg, root }) {
   const totalSets = phases.filter((p) => p.kind === "work").length;
   const firstSec = phases[0]?.seconds || 60;
   const ring = renderTimerRing(firstSec);
+  // Pre-Start ring shows "READY" + the duration of the first phase (the 15s
+  // get-ready). Once Start fires, the engine emits a phase change which
+  // updates the label to "GET READY" and starts ticking.
   ring.setPhase("READY", firstSec);
   const engine = makeIntervalEngine(phases);
 
@@ -309,7 +312,7 @@ function renderStandard({ ex, lastAvg, root }) {
     const open = await getOrCreateOpenSession();
     sessionId = open.id;
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
-    unlockAudio();
+    await unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
     skipBtn.classList.remove("hidden");
@@ -399,8 +402,9 @@ function renderStandard({ ex, lastAvg, root }) {
 
 function renderBilateral({ ex, lastAvg, root }) {
   const phases = bilateralPhases(3);
-  const ring = renderTimerRing(60);
-  ring.setPhase("READY", 60);
+  const firstSec = phases[0]?.seconds || 60;
+  const ring = renderTimerRing(firstSec);
+  ring.setPhase("READY", firstSec);
   const engine = makeIntervalEngine(phases);
 
   let sessionId = null;
@@ -444,7 +448,7 @@ function renderBilateral({ ex, lastAvg, root }) {
     const open = await getOrCreateOpenSession();
     sessionId = open.id;
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
-    unlockAudio();
+    await unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
     skipBtn.classList.remove("hidden");
@@ -533,8 +537,9 @@ function renderBilateral({ ex, lastAvg, root }) {
 
 function renderContinuous({ ex, lastAvg, root }) {
   const phases = continuousPhases();
-  const ring = renderTimerRing(600);
-  ring.setPhase("READY", 600);
+  const firstSec = phases[0]?.seconds || 60;
+  const ring = renderTimerRing(firstSec);
+  ring.setPhase("READY", firstSec);
   const engine = makeIntervalEngine(phases);
 
   let sessionId = null;
@@ -586,15 +591,22 @@ function renderContinuous({ ex, lastAvg, root }) {
     const open = await getOrCreateOpenSession();
     sessionId = open.id;
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
-    unlockAudio();
+    await unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
     skipBtn.classList.remove("hidden");
-    tapWrap.classList.remove("hidden");
-    indicator.set("10-minute block · working");
+    indicator.set("Get ready · 10-minute block starting");
   });
 
-  engine.onPhase(({ phase }) => ring.setPhase(phase.label, phase.seconds));
+  engine.onPhase(({ phase }) => {
+    ring.setPhase(phase.label, phase.seconds);
+    // Tap counter only appears once the WORK block actually begins, so the
+    // user can't rack up taps during the 15-second get-ready countdown.
+    if (phase.kind === "work") {
+      tapWrap.classList.remove("hidden");
+      indicator.set("10-minute block · working");
+    }
+  });
   engine.onTick(({ remaining }) => ring.setRemaining(remaining));
   engine.onDone(() => {
     skipBtn.classList.add("hidden");

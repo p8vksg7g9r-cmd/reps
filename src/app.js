@@ -14,7 +14,7 @@ import { SessionSummaryView } from "./views/session-summary.js";
 
 // Bumped on every shipped change so the user can verify on the Profile screen
 // which build is actually running on their device.
-export const APP_VERSION = "v0.7";
+export const APP_VERSION = "v0.8";
 
 async function boot() {
   await seedIfEmpty(STARTER_EXERCISES);
