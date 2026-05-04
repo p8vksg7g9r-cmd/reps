@@ -33,7 +33,9 @@ export function aggregate({ sessions, sets, start, end }) {
   const inRange = sessions.filter((s) => s.startedAt >= start && s.startedAt < end);
   const sessionIds = new Set(inRange.map((s) => s.id));
   const setRows = sets.filter((s) => sessionIds.has(s.sessionId));
-  const exerciseIds = new Set(inRange.map((s) => s.exerciseId));
+  // Sessions span multiple exercises now, so unique exercise count comes from
+  // the set rows (which always carry exerciseId), not from a session-level field.
+  const exerciseIds = new Set(setRows.map((s) => s.exerciseId));
   let vol = 0;
   for (const s of setRows) vol += setVolume(s);
   return {

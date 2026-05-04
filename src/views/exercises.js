@@ -1,9 +1,14 @@
-import { listExercises, lastSessionForExercise, addExercise, deleteExercise, updateExercise } from "../db/repo.js";
+import { listExercises, lastSessionForExercise, getOpenSession, endSession } from "../db/repo.js";
 import { restState } from "../domain/rest-rule.js";
-import { h, eyebrow, badge, modal, field, fmtKg } from "../ui/components.js";
+import { tx, reqAsPromise } from "../db/schema.js";
+import { h, eyebrow, badge, modal, fmtKg, setTypeStructure } from "../ui/components.js";
+
+function fmtTime(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 export async function ExercisesView(_params, root) {
-  const exercises = await listExercises();
+  const [exercises, openSession] = await Promise.all([listExercises(), getOpenSession()]);
   const enriched = await Promise.all(exercises.map(async (e) => {
     const last = await lastSessionForExercise(e.id);
     return { ex: e, lastAt: last?.startedAt ?? null };
@@ -12,19 +17,37 @@ export async function ExercisesView(_params, root) {
 
   const head = h("div", { class: "page-head row-between" }, [
     h("div", {}, [
-      eyebrow("Pick a lift"),
-      h("h1", { class: "display-l" }, "Lifts")
+      eyebrow(openSession ? "Pick the next exercise" : "Pick an exercise to start"),
+      h("h1", { class: "display-l" }, "Exercises")
     ]),
     h("a", { class: "btn btn-ghost btn-sm", href: "#/manage-exercises" }, "Manage")
   ]);
 
+  // Open-session banner with End-session escape hatch
+  let openBanner = null;
+  if (openSession) {
+    const t = await tx(["sets"]);
+    const setsAll = await reqAsPromise(t.objectStore("sets").getAll());
+    const sessionSets = setsAll.filter((s) => s.sessionId === openSession.id && s.reps != null);
+    const exCount = new Set(sessionSets.map((s) => s.exerciseId)).size;
+    openBanner = h("div", { class: "card stack-sm", style: "background: var(--brass); color: var(--navy-deep); margin-bottom: 16px" }, [
+      h("div", {}, [
+        h("div", { class: "eyebrow", style: "color: var(--navy-deep); opacity:0.75" }, "Session in progress"),
+        h("div", { class: "mono", style: "font-weight:600" },
+          `Started ${fmtTime(openSession.startedAt)} · ${exCount} exercise${exCount === 1 ? "" : "s"} done`)
+      ]),
+      h("button", { class: "btn btn-block", style: "background: var(--navy-deep); color: var(--paper)", onclick: async () => {
+        if (!confirm("End this session now?")) return;
+        await endSession(openSession.id);
+        location.hash = `#/summary/${openSession.id}`;
+      } }, "End session")
+    ]);
+  }
+
   const list = h("div", { class: "stack-sm" }, enriched.map(({ ex, lastAt }) => {
     const rest = restState(lastAt);
-    const setTypeLabel = ex.setType === "standard" ? `Standard · ${ex.rounds} rounds`
-      : ex.setType === "bilateral" ? "Bilateral · 3 rounds"
-      : "Continuous · 10 min";
     const weightLabel = ex.bodyweight ? " · BW" : (ex.workingWeight ? ` · ${fmtKg(ex.workingWeight)}` : "");
-    const sub = `${setTypeLabel}${weightLabel}`;
+    const sub = `${setTypeStructure(ex)}${weightLabel}`;
 
     const row = h("a", {
       class: `ex-row${rest.resting ? " resting" : ""}`,
@@ -48,9 +71,10 @@ export async function ExercisesView(_params, root) {
   }));
 
   root.appendChild(head);
+  if (openBanner) root.appendChild(openBanner);
   root.appendChild(list);
   root.appendChild(h("p", { class: "eyebrow", style: "text-align:center; margin-top:24px" },
-    "Tap Manage to add or edit lifts"));
+    "Tap Manage to add or edit exercises"));
 
   function confirmOverride(ex, rest) {
     const m = modal([

@@ -1,12 +1,24 @@
 import {
-  getExercise, startSession, endSession,
+  getExercise, getOpenSession, getOrCreateOpenSession, endSession,
   recordSet, updateSet, setsForSession, lastSessionForExercise, updateExercise
 } from "../db/repo.js";
-import { h, eyebrow, stepper, field, modal } from "../ui/components.js";
+import { h, eyebrow, stepper, field, modal, setTypeStructure } from "../ui/components.js";
 import {
-  makeIntervalEngine, standardPhases, bilateralPhases, continuousPhases,
+  makeIntervalEngine, standardPhases, bilateralPhases, continuousPhases, ninetyBilateralPhases,
   renderTimerRing, unlockAudio
 } from "../ui/timer.js";
+
+/** Pick the timing phases for an exercise based on its set type. */
+function phasesFor(ex) {
+  switch (ex.setType) {
+    case "bilateral":        return bilateralPhases(3);
+    case "continuous":       return continuousPhases();
+    case "six_ten":          return standardPhases(6);
+    case "ninety_bilateral": return ninetyBilateralPhases();
+    case "standard":
+    default:                 return standardPhases(ex.rounds || 3);
+  }
+}
 import { makeTapCounter } from "../ui/tap-counter.js";
 
 export async function SessionView(params, root) {
@@ -17,27 +29,32 @@ export async function SessionView(params, root) {
     return;
   }
 
-  const lastAvg = await computeLastAvg(exerciseId);
+  // The "last time avg" reference looks at the previous session containing this
+  // exercise — explicitly excluding the currently open session, which may
+  // already have prior sets for this same exercise.
+  const openSess = await getOpenSession();
+  const lastAvg = await computeLastAvg(exerciseId, openSess?.id);
 
   const head = h("div", { class: "page-head" }, [
-    eyebrow(ex.setType === "standard" ? `Standard · ${ex.rounds} rounds`
-            : ex.setType === "bilateral" ? "Bilateral · 3 rounds"
-            : "Continuous · 10 min"),
+    eyebrow(setTypeStructure(ex)),
     h("h1", { class: "display-l" }, ex.name)
   ]);
   root.appendChild(head);
 
-  if (ex.setType === "standard") return renderStandard({ ex, lastAvg, root });
+  // Bilateral and continuous have bespoke renderers (L/R alternation; tap counter).
+  // Everything else routes through the standard work/rest renderer with custom phases.
   if (ex.setType === "bilateral") return renderBilateral({ ex, lastAvg, root });
   if (ex.setType === "continuous") return renderContinuous({ ex, lastAvg, root });
+  return renderStandard({ ex, lastAvg, root });
 }
 
 /* ----------------------------------------------------- helpers */
 
-async function computeLastAvg(exerciseId) {
-  const last = await lastSessionForExercise(exerciseId);
+async function computeLastAvg(exerciseId, openSessionId) {
+  const last = await lastSessionForExercise(exerciseId, { excludeSessionId: openSessionId });
   if (!last) return null;
-  const sets = await setsForSession(last.id);
+  // The session may contain other exercises too — only this exercise's sets count.
+  const sets = (await setsForSession(last.id)).filter((s) => s.exerciseId === exerciseId);
   const valid = sets.filter((s) => s.reps != null && s.reps > 0).map((s) => s.reps);
   if (valid.length === 0) return null;
   return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
@@ -209,19 +226,51 @@ function currentWeightValue(stateRef, stepperEl) {
   return stateRef.value;
 }
 
+/**
+ * The two-button block shown after an exercise's sets are all logged:
+ *   [Start new exercise]   — keeps the current session open, returns to picker
+ *   [End session]          — closes the session and goes to its summary
+ * Both call the provided onPersist hook first so the exercise's working
+ * weight is saved before we navigate away.
+ */
+function makeEndOfExerciseButtons({ getSessionId, onPersist }) {
+  const wrap = h("div", { class: "stack hidden" });
+  const startNew = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start new exercise");
+  const endSess = h("button", { class: "btn btn-ghost btn-block btn-lg" }, "End session");
+  startNew.addEventListener("click", async () => {
+    await onPersist?.();
+    location.hash = "#/exercises";
+  });
+  endSess.addEventListener("click", async () => {
+    await onPersist?.();
+    const sid = getSessionId();
+    if (sid != null) await endSession(sid);
+    location.hash = `#/summary/${sid}`;
+  });
+  wrap.appendChild(startNew);
+  wrap.appendChild(endSess);
+  return {
+    el: wrap,
+    show() { wrap.classList.remove("hidden"); },
+    hide() { wrap.classList.add("hidden"); }
+  };
+}
+
 /* ----------------------------------------------------- standard */
 
 function renderStandard({ ex, lastAvg, root }) {
-  const phases = standardPhases(ex.rounds);
-  const ring = renderTimerRing(60);
-  ring.setPhase("READY", 60);
+  const phases = phasesFor(ex);
+  const totalSets = phases.filter((p) => p.kind === "work").length;
+  const firstSec = phases[0]?.seconds || 60;
+  const ring = renderTimerRing(firstSec);
+  ring.setPhase("READY", firstSec);
   const engine = makeIntervalEngine(phases);
 
   let sessionId = null;
   const weight = { value: ex.bodyweight ? 0 : null };  // blank — user enters from scratch
   const setIds = new Map();
 
-  const indicator = makeSetIndicator(`Set 1 of ${ex.rounds} · ready`, lastAvg);
+  const indicator = makeSetIndicator(`Set 1 of ${totalSets} · ready`, lastAvg);
   const weightStepper = ex.bodyweight ? null : stepper({
     value: "",                                       // empty by default
     step: 1,
@@ -235,15 +284,16 @@ function renderStandard({ ex, lastAvg, root }) {
     h("span", { style: "color: var(--ink-mute)" }, "no external load")
   ]) : null;
   const completed = makeCompletedLog({ unitLabel: "Set" });
-  const repsPanel = makeRepsPanel({ setType: "standard" });
+  // For all standard-like types (standard, six_ten, ninety_bilateral) we use
+  // "Set" labeling; bilateral uses "Round" labeling in its own renderer.
+  const repsPanel = makeRepsPanel({ setType: ex.setType });
 
   const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "Skip phase");
-  const finishBtn = h("button", { class: "btn btn-primary btn-block btn-lg hidden", onclick: async () => {
-    await updateExercise(ex.id, { workingWeight: weight.value });
-    await endSession(sessionId);
-    location.hash = `#/exercise/${ex.id}`;
-  } }, "Finish & save");
+  const endButtons = makeEndOfExerciseButtons({
+    getSessionId: () => sessionId,
+    onPersist: async () => updateExercise(ex.id, { workingWeight: weight.value })
+  });
 
   startBtn.addEventListener("click", async () => {
     if (!ex.bodyweight) {
@@ -256,7 +306,8 @@ function renderStandard({ ex, lastAvg, root }) {
       weight.value = w;
     }
     startError.hide();
-    sessionId = await startSession(ex.id);
+    const open = await getOrCreateOpenSession();
+    sessionId = open.id;
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     unlockAudio();
     engine.start();
@@ -277,12 +328,12 @@ function renderStandard({ ex, lastAvg, root }) {
       const round = prevPhase.round;
       const setId = await recordSet({
         sessionId, exerciseId: ex.id, round,
-        weight: weight.value, reps: null, setType: "standard"
+        weight: weight.value, reps: null, setType: ex.setType
       });
       setIds.set(round, setId);
 
       if (phase.kind === "rest") {
-        indicator.set(`Set ${round} done · Set ${round + 1} of ${ex.rounds} next`);
+        indicator.set(`Set ${round} done · Set ${round + 1} of ${totalSets} next`);
         repsPanel.showPrompt({
           round,
           hint: `Set ${round} done — log the reps`,
@@ -293,7 +344,7 @@ function renderStandard({ ex, lastAvg, root }) {
         });
       }
     } else if (phase.kind === "work") {
-      indicator.set(`Set ${phase.round} of ${ex.rounds} · working`);
+      indicator.set(`Set ${phase.round} of ${totalSets} · working`);
       repsPanel.clear();
     }
   });
@@ -306,24 +357,24 @@ function renderStandard({ ex, lastAvg, root }) {
       const round = last.round;
       const setId = await recordSet({
         sessionId, exerciseId: ex.id, round,
-        weight: weight.value, reps: null, setType: "standard"
+        weight: weight.value, reps: null, setType: ex.setType
       });
       setIds.set(round, setId);
     }
     skipBtn.classList.add("hidden");
     ring.setPhase("DONE", 0);
-    indicator.set("Workout complete");
+    indicator.set("Exercise complete");
 
-    const all = await setsForSession(sessionId);
+    // Filter to this exercise's sets only — sessions are now multi-exercise.
+    const all = (await setsForSession(sessionId)).filter((s) => s.exerciseId === ex.id);
     const missing = all.filter((s) => s.reps == null).sort((a, b) => a.round - b.round);
     if (missing.length > 0) {
-      await promptMissingReps(missing, { setType: "standard" });
-      // After modal saves, refresh completed log with the freshly-filled values.
-      const fresh = await setsForSession(sessionId);
+      await promptMissingReps(missing, { setType: ex.setType });
+      const fresh = (await setsForSession(sessionId)).filter((s) => s.exerciseId === ex.id);
       for (const s of fresh) if (s.reps != null) completed.upsert(s.round, s.reps);
     }
-    repsPanel.showText("All sets logged. Finish to save.");
-    finishBtn.classList.remove("hidden");
+    repsPanel.showText("All sets logged. Pick the next exercise or end the session.");
+    endButtons.show();
   });
 
   root.appendChild(indicator.el);
@@ -339,7 +390,7 @@ function renderStandard({ ex, lastAvg, root }) {
   root.appendChild(startError.el);
   root.appendChild(startBtn);
   root.appendChild(skipBtn);
-  root.appendChild(finishBtn);
+  root.appendChild(endButtons.el);
 
   return () => engine.stop();
 }
@@ -374,11 +425,10 @@ function renderBilateral({ ex, lastAvg, root }) {
 
   const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "Skip phase");
-  const finishBtn = h("button", { class: "btn btn-primary btn-block btn-lg hidden", onclick: async () => {
-    await updateExercise(ex.id, { workingWeight: weight.value });
-    await endSession(sessionId);
-    location.hash = `#/exercise/${ex.id}`;
-  } }, "Finish & save");
+  const endButtons = makeEndOfExerciseButtons({
+    getSessionId: () => sessionId,
+    onPersist: async () => updateExercise(ex.id, { workingWeight: weight.value })
+  });
 
   startBtn.addEventListener("click", async () => {
     if (!ex.bodyweight) {
@@ -391,7 +441,8 @@ function renderBilateral({ ex, lastAvg, root }) {
       weight.value = w;
     }
     startError.hide();
-    sessionId = await startSession(ex.id);
+    const open = await getOrCreateOpenSession();
+    sessionId = open.id;
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     unlockAudio();
     engine.start();
@@ -447,17 +498,17 @@ function renderBilateral({ ex, lastAvg, root }) {
     }
     skipBtn.classList.add("hidden");
     ring.setPhase("DONE", 0);
-    indicator.set("Workout complete");
+    indicator.set("Exercise complete");
 
-    const all = await setsForSession(sessionId);
+    const all = (await setsForSession(sessionId)).filter((s) => s.exerciseId === ex.id);
     const missing = all.filter((s) => s.reps == null).sort((a, b) => a.round - b.round);
     if (missing.length > 0) {
       await promptMissingReps(missing, { setType: "bilateral" });
-      const fresh = await setsForSession(sessionId);
+      const fresh = (await setsForSession(sessionId)).filter((s) => s.exerciseId === ex.id);
       for (const s of fresh) if (s.reps != null) completed.upsert(s.round, s.reps);
     }
-    repsPanel.showText("All rounds logged. Finish to save.");
-    finishBtn.classList.remove("hidden");
+    repsPanel.showText("All rounds logged. Pick the next exercise or end the session.");
+    endButtons.show();
   });
 
   root.appendChild(indicator.el);
@@ -473,7 +524,7 @@ function renderBilateral({ ex, lastAvg, root }) {
   root.appendChild(startError.el);
   root.appendChild(startBtn);
   root.appendChild(skipBtn);
-  root.appendChild(finishBtn);
+  root.appendChild(endButtons.el);
 
   return () => engine.stop();
 }
@@ -507,16 +558,19 @@ function renderContinuous({ ex, lastAvg, root }) {
 
   const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "End early");
-  const finishBtn = h("button", { class: "btn btn-primary btn-block btn-lg hidden", onclick: async () => {
-    if (!sessionId) return;
-    await recordSet({
-      sessionId, exerciseId: ex.id, round: 1,
-      weight: weight.value, reps: tap.count, setType: "continuous"
-    });
-    await updateExercise(ex.id, { workingWeight: weight.value });
-    await endSession(sessionId);
-    location.hash = `#/exercise/${ex.id}`;
-  } }, "Finish & save");
+  const endButtons = makeEndOfExerciseButtons({
+    getSessionId: () => sessionId,
+    onPersist: async () => {
+      // Persist the single continuous-block set + working weight.
+      if (sessionId != null) {
+        await recordSet({
+          sessionId, exerciseId: ex.id, round: 1,
+          weight: weight.value, reps: tap.count, setType: "continuous"
+        });
+      }
+      await updateExercise(ex.id, { workingWeight: weight.value });
+    }
+  });
 
   startBtn.addEventListener("click", async () => {
     if (!ex.bodyweight) {
@@ -529,7 +583,8 @@ function renderContinuous({ ex, lastAvg, root }) {
       weight.value = w;
     }
     startError.hide();
-    sessionId = await startSession(ex.id);
+    const open = await getOrCreateOpenSession();
+    sessionId = open.id;
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     unlockAudio();
     engine.start();
@@ -543,9 +598,9 @@ function renderContinuous({ ex, lastAvg, root }) {
   engine.onTick(({ remaining }) => ring.setRemaining(remaining));
   engine.onDone(() => {
     skipBtn.classList.add("hidden");
-    finishBtn.classList.remove("hidden");
+    endButtons.show();
     ring.setPhase("DONE", 0);
-    indicator.set("Block complete");
+    indicator.set("Exercise complete");
   });
 
   root.appendChild(indicator.el);
@@ -559,7 +614,7 @@ function renderContinuous({ ex, lastAvg, root }) {
   root.appendChild(startError.el);
   root.appendChild(startBtn);
   root.appendChild(skipBtn);
-  root.appendChild(finishBtn);
+  root.appendChild(endButtons.el);
 
   return () => engine.stop();
 }

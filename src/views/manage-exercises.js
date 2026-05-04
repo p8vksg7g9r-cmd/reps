@@ -1,5 +1,14 @@
 import { listExercises, addExercise, updateExercise, deleteExercise } from "../db/repo.js";
-import { h, eyebrow, modal, field, fmtKg } from "../ui/components.js";
+import { h, eyebrow, modal, field, fmtKg, setTypeStructure } from "../ui/components.js";
+
+// rounds policy per setType — null means "no rounds applicable"
+const FIXED_ROUNDS = {
+  standard: null,             // user picks
+  bilateral: 3,
+  continuous: null,           // single block
+  six_ten: 6,
+  ninety_bilateral: 2
+};
 
 export async function ManageExercisesView(_params, root) {
   const exercises = await listExercises();
@@ -23,9 +32,7 @@ export async function ManageExercisesView(_params, root) {
   }
 
   function buildRow(ex) {
-    const setTypeLabel = ex.setType === "standard" ? `Standard · ${ex.rounds} rounds`
-      : ex.setType === "bilateral" ? "Bilateral · 3 rounds"
-      : "Continuous · 10 min";
+    const setTypeLabel = setTypeStructure(ex);
     const weightLabel = ex.bodyweight ? "Bodyweight" : (ex.workingWeight ? fmtKg(ex.workingWeight) : "no weight set");
 
     const bwToggle = h("button", {
@@ -95,16 +102,19 @@ export async function ManageExercisesView(_params, root) {
     nameInput.addEventListener("input", () => v.name = nameInput.value.trim());
 
     const typeSel = h("select", {}, [
-      h("option", { value: "standard", selected: v.setType === "standard" }, "Standard"),
-      h("option", { value: "bilateral", selected: v.setType === "bilateral" }, "Bilateral"),
-      h("option", { value: "continuous", selected: v.setType === "continuous" }, "Continuous")
+      h("option", { value: "standard",         selected: v.setType === "standard" },         "Standard"),
+      h("option", { value: "bilateral",        selected: v.setType === "bilateral" },        "Bilateral"),
+      h("option", { value: "continuous",       selected: v.setType === "continuous" },       "10/10"),
+      h("option", { value: "six_ten",          selected: v.setType === "six_ten" },          "6/10"),
+      h("option", { value: "ninety_bilateral", selected: v.setType === "ninety_bilateral" }, "90 Bilateral")
     ]);
     typeSel.addEventListener("change", () => {
       v.setType = typeSel.value;
-      // Bilateral always has 3 rounds; continuous has none.
-      if (v.setType === "bilateral") v.rounds = 3;
-      if (v.setType === "continuous") v.rounds = null;
-      roundsInput.value = String(v.rounds ?? "");
+      // Auto-set fixed rounds for non-standard types; standard keeps user-editable.
+      const fixed = FIXED_ROUNDS[v.setType];
+      if (fixed !== null) v.rounds = fixed;
+      else if (v.rounds == null) v.rounds = 3;
+      roundsInput.value = v.rounds != null ? String(v.rounds) : "";
       roundsInput.disabled = v.setType !== "standard";
     });
 
@@ -141,8 +151,9 @@ export async function ManageExercisesView(_params, root) {
         h("button", { class: "btn btn-ghost", onclick: () => m.close() }, "Cancel"),
         h("div", { class: "spacer" }),
         h("button", { class: "btn btn-primary", onclick: async () => {
-          if (v.setType === "bilateral") v.rounds = 3;
-          if (v.setType === "continuous") v.rounds = null;
+          // Re-pin fixed rounds in case the user changed type mid-edit.
+          const fixed = FIXED_ROUNDS[v.setType];
+          if (fixed !== null) v.rounds = fixed;
           await onSubmit(v);
           m.close();
           window.dispatchEvent(new HashChangeEvent("hashchange"));

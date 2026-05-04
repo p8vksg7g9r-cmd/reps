@@ -93,16 +93,46 @@ export async function deleteExercise(id) {
 }
 
 /* -------------------- sessions + sets -------------------- */
+// A "session" is a gym visit. It contains multiple exercises. There's at most
+// one OPEN session at a time (endedAt === null). Older session rows may carry
+// a legacy `exerciseId` field — that field is ignored by new code and is no
+// longer set on insert.
 
-export async function startSession(exerciseId) {
+export async function startSession() {
   const t = await tx(["sessions"], "readwrite");
   const id = await reqAsPromise(t.objectStore("sessions").add({
-    exerciseId,
     startedAt: Date.now(),
     endedAt: null
   }));
   await txDone(t);
   return id;
+}
+
+export async function getOpenSession() {
+  const t = await tx(["sessions"]);
+  const idx = t.objectStore("sessions").index("by_startedAt");
+  return new Promise((resolve, reject) => {
+    const cur = idx.openCursor(null, "prev");
+    cur.onsuccess = (e) => {
+      const c = e.target.result;
+      if (!c) return resolve(null);
+      if (c.value.endedAt == null) return resolve(c.value);
+      c.continue();
+    };
+    cur.onerror = () => reject(cur.error);
+  });
+}
+
+export async function getOrCreateOpenSession() {
+  const open = await getOpenSession();
+  if (open) return open;
+  const id = await startSession();
+  return { id, startedAt: Date.now(), endedAt: null };
+}
+
+export async function getSession(id) {
+  const t = await tx(["sessions"]);
+  return reqAsPromise(t.objectStore("sessions").get(id));
 }
 
 export async function endSession(sessionId) {
@@ -155,20 +185,33 @@ export async function allSessions() {
   return reqAsPromise(t.objectStore("sessions").getAll());
 }
 
-export async function lastSessionForExercise(exerciseId) {
-  const t = await tx(["sessions"]);
-  const idx = t.objectStore("sessions").index("by_exerciseId");
-  return new Promise((resolve, reject) => {
-    let best = null;
-    const cur = idx.openCursor(IDBKeyRange.only(exerciseId));
+/**
+ * The most recent session that contains at least one set for this exercise.
+ * Optionally exclude a given session id (e.g. the currently open one) so the
+ * "last time" reference points to a previous visit, not the in-progress one.
+ *
+ * Walks the sets-by-exercise index in descending order, picks the first
+ * sessionId that doesn't match the exclusion, then fetches the session row.
+ */
+export async function lastSessionForExercise(exerciseId, { excludeSessionId } = {}) {
+  const t1 = await tx(["sets"]);
+  const setsIdx = t1.objectStore("sets").index("by_exercise_completedAt");
+  const range = IDBKeyRange.bound([exerciseId, 0], [exerciseId, Number.MAX_SAFE_INTEGER]);
+
+  const sessionId = await new Promise((resolve, reject) => {
+    const cur = setsIdx.openCursor(range, "prev");
     cur.onsuccess = (e) => {
       const c = e.target.result;
-      if (!c) return resolve(best);
-      if (!best || c.value.startedAt > best.startedAt) best = c.value;
-      c.continue();
+      if (!c) return resolve(null);
+      if (c.value.sessionId === excludeSessionId) { c.continue(); return; }
+      resolve(c.value.sessionId);
     };
     cur.onerror = () => reject(cur.error);
   });
+
+  if (sessionId == null) return null;
+  const t2 = await tx(["sessions"]);
+  return reqAsPromise(t2.objectStore("sessions").get(sessionId));
 }
 
 /* -------------------- export / import -------------------- */

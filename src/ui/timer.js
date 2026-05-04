@@ -135,9 +135,18 @@ export function bilateralPhases(n = 3) {
   return out;
 }
 
-/** Build continuous phase: single 10-min work block. */
+/** Build continuous phase (display name "10/10"): single 10-min work block. */
 export function continuousPhases() {
   return [{ label: "WORK", kind: "work", seconds: 600, round: 1 }];
+}
+
+/** 90 Bilateral: 90s work / 60s rest / 90s work. Two work intervals total. */
+export function ninetyBilateralPhases() {
+  return [
+    { label: "WORK", kind: "work", seconds: 90, round: 1 },
+    { label: "REST", kind: "rest", seconds: 60, round: 1 },
+    { label: "WORK", kind: "work", seconds: 90, round: 2 }
+  ];
 }
 
 /** Render the timer ring: returns the root element with helpers to update. */

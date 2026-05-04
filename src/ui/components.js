@@ -150,6 +150,30 @@ export function fmtDay(ms) {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 }
 
+/* ---------- set-type label helpers (single source of truth) ---------- */
+
+export function setTypeName(setType) {
+  switch (setType) {
+    case "standard":         return "Standard";
+    case "bilateral":        return "Bilateral";
+    case "continuous":       return "10/10";
+    case "six_ten":          return "6/10";
+    case "ninety_bilateral": return "90 Bilateral";
+    default: return setType || "Set";
+  }
+}
+
+export function setTypeStructure(ex) {
+  switch (ex?.setType) {
+    case "standard":         return `Standard · ${ex.rounds || 3} sets`;
+    case "bilateral":        return `Bilateral · 3 rounds`;
+    case "continuous":       return `10/10 · 10 min block`;
+    case "six_ten":          return `6/10 · 6 sets`;
+    case "ninety_bilateral": return `90 Bilateral · 2 × 90s`;
+    default: return setTypeName(ex?.setType);
+  }
+}
+
 export function fmtAge(dobMs) {
   const d = new Date(dobMs);
   const now = new Date();

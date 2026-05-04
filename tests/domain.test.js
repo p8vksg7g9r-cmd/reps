@@ -132,16 +132,18 @@ test("weeklySummary: counts sessions and computes WoW delta", () => {
   const thisWeekStart = startOfIsoWeek(now);
   const lastWeekStart = thisWeekStart - 7 * 86400000;
 
+  // Sessions span multiple exercises now; the aggregate derives the unique
+  // exercise count from set rows (sets always carry exerciseId).
   const sessions = [
-    { id: 1, exerciseId: 10, startedAt: thisWeekStart + 3600000 },
-    { id: 2, exerciseId: 11, startedAt: thisWeekStart + 2 * 86400000 },
-    { id: 3, exerciseId: 10, startedAt: lastWeekStart + 86400000 }
+    { id: 1, startedAt: thisWeekStart + 3600000 },
+    { id: 2, startedAt: thisWeekStart + 2 * 86400000 },
+    { id: 3, startedAt: lastWeekStart + 86400000 }
   ];
   const sets = [
-    { sessionId: 1, setType: "standard", weight: 50, reps: 10 },
-    { sessionId: 1, setType: "standard", weight: 50, reps: 8 },
-    { sessionId: 2, setType: "bilateral", weight: 20, reps: 10 },
-    { sessionId: 3, setType: "standard", weight: 40, reps: 10 }
+    { sessionId: 1, exerciseId: 10, setType: "standard", weight: 50, reps: 10 },
+    { sessionId: 1, exerciseId: 10, setType: "standard", weight: 50, reps: 8 },
+    { sessionId: 2, exerciseId: 11, setType: "bilateral", weight: 20, reps: 10 },
+    { sessionId: 3, exerciseId: 10, setType: "standard", weight: 40, reps: 10 }
   ];
   const sum = weeklySummary({ sessions, sets, now });
   assert.equal(sum.current.sessions, 2);

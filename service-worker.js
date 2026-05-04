@@ -1,5 +1,5 @@
 /* REPS service worker — cache-first app shell. */
-const CACHE = "reps-v6";
+const CACHE = "reps-v7";
 const SHELL = [
   "./",
   "./index.html",
@@ -27,6 +27,7 @@ const SHELL = [
   "./src/views/history.js",
   "./src/views/profile.js",
   "./src/views/manage-exercises.js",
+  "./src/views/session-summary.js",
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png"
 ];
