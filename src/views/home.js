@@ -76,7 +76,7 @@ export async function HomeView(_params, root) {
 
   const volStat = stat({
     label: "Total volume",
-    value: fmtVolume(current.volume) + " kg",
+    value: fmtVolume(current.volume),
     delta: delta.volume === 0 ? "no change" : fmtDelta(Math.round(delta.volume), " kg")
   });
 
@@ -101,7 +101,7 @@ export async function HomeView(_params, root) {
       }, [
         h("div", { class: "meta" }, [
           h("div", { class: "name" }, new Date(s.startedAt).toLocaleDateString()),
-          h("div", { class: "sub" }, `${subtitle} · ${fmtVolume(vol)} kg`)
+          h("div", { class: "sub" }, `${subtitle} · ${fmtVolume(vol)}`)
         ])
       ]);
     })

@@ -121,11 +121,14 @@ export function fmtKg(n) {
   return `${Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1)} kg`;
 }
 
+// Always returns a unit-correct string. Callers must NOT append " kg" — the
+// tonnes/kg switchover is owned here so the two unit suffixes can never both
+// be rendered together.
 export function fmtVolume(n) {
-  if (!n) return "0";
-  if (n >= 10000) return `${(n / 1000).toFixed(1)}t`; // tonnes
-  if (n >= 1000) return `${(n / 1000).toFixed(2)}t`;
-  return String(Math.round(n));
+  if (!n) return "0 kg";
+  if (n >= 10000) return `${(n / 1000).toFixed(1)} t`;
+  if (n >= 1000)  return `${(n / 1000).toFixed(2)} t`;
+  return `${Math.round(n)} kg`;
 }
 
 export function fmtDelta(n, unit = "") {

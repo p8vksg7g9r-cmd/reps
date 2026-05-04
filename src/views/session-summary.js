@@ -57,7 +57,7 @@ export async function SessionSummaryView(params, root) {
   const totals = h("div", { class: "grid-2" }, [
     h("div", { class: "stat" }, [
       h("div", { class: "label" }, "Total volume"),
-      h("div", { class: "value mono" }, `${fmtVolume(totalVolume)} kg`)
+      h("div", { class: "value mono" }, fmtVolume(totalVolume))
     ]),
     h("div", { class: "stat" }, [
       h("div", { class: "label" }, "Total reps"),
@@ -85,7 +85,7 @@ export async function SessionSummaryView(params, root) {
     return h("div", { class: "card stack-sm" }, [
       h("div", { class: "row-between" }, [
         h("div", { style: "font-family: var(--font-display); font-weight: 700; font-size: 16px" }, ex?.name ?? "Exercise"),
-        h("span", { class: "badge badge-brass mono" }, `${fmtVolume(vol)} kg`)
+        h("span", { class: "badge badge-brass mono" }, fmtVolume(vol))
       ]),
       h("div", {}, setLines)
     ]);

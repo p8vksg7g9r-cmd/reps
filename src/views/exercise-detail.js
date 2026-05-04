@@ -49,7 +49,7 @@ export async function ExerciseDetailView(params, root) {
       h("div", { class: "body", style: "font-weight:600" }, `${fmtKg(s.weight)} × ${s.reps}${s.setType === "bilateral" ? " /side" : ""}`),
       h("div", { class: "mono", style: "font-size:11px; color: var(--ink-mute)" }, `Round ${s.round} · ${fmtDate(s.completedAt)}`)
     ]),
-    h("div", { class: "mono", style: "font-size:13px; color: var(--ink-soft)" }, `${fmtVolume(setVolume(s))} kg`)
+    h("div", { class: "mono", style: "font-size:13px; color: var(--ink-soft)" }, fmtVolume(setVolume(s)))
   ])));
 
   const cta = h("a", { href: `#/session/new/${ex.id}`, class: "btn btn-primary btn-block btn-lg" }, "Start session");

@@ -71,7 +71,7 @@ export async function HistoryView(_params, root) {
       const block = h("section", { class: "day-group" }, [
         h("div", { class: "day-head" }, [
           h("div", { class: "date" }, fmtDay(g.dayMs)),
-          h("div", { class: "vol mono" }, `${fmtVolume(dayVol)} kg`)
+          h("div", { class: "vol mono" }, fmtVolume(dayVol))
         ]),
         ...g.sessions.map((s) => {
           const ssets = sets.filter((x) => x.sessionId === s.id);
@@ -93,7 +93,7 @@ export async function HistoryView(_params, root) {
               h("div", { class: "row-between" }, [
                 h("div", { style: "font-weight:600; font-size: 14px" }, ex?.name ?? "Exercise"),
                 h("div", { class: "mono", style: "font-size:11px; color: var(--ink-mute)" },
-                  `${fmtVolume(exSets.reduce((a, x) => a + setVolume(x), 0))} kg`)
+                  fmtVolume(exSets.reduce((a, x) => a + setVolume(x), 0)))
               ]),
               h("div", { style: "margin-top: 4px" }, lines)
             ]);
@@ -102,7 +102,7 @@ export async function HistoryView(_params, root) {
             h("div", { class: "row-between" }, [
               h("div", { style: "font-weight:600" }, `Session · ${fmtTime(s.startedAt)}`),
               h("div", { class: "mono", style: "font-size:12px; color: var(--ink-mute)" },
-                `${orderedIds.length} ex · ${fmtVolume(sessionVol)} kg`)
+                `${orderedIds.length} ex · ${fmtVolume(sessionVol)}`)
             ]),
             ...exerciseBlocks
           ]);
