@@ -1,5 +1,8 @@
-import { getExercise, startSession, endSession, recordSet, updateExercise } from "../db/repo.js";
-import { h, eyebrow, stepper, field, fmtKg } from "../ui/components.js";
+import {
+  getExercise, startSession, endSession,
+  recordSet, updateSet, setsForSession, updateExercise
+} from "../db/repo.js";
+import { h, eyebrow, stepper, field, modal } from "../ui/components.js";
 import {
   makeIntervalEngine, standardPhases, bilateralPhases, continuousPhases,
   renderTimerRing, unlockAudio
@@ -8,11 +11,13 @@ import { makeTapCounter } from "../ui/tap-counter.js";
 
 /**
  * Routes:
- *   /session/new/:exerciseId   → starts a fresh session for an exercise
+ *   /session/new/:exerciseId
  *
- * The view manages its own state for the duration of the workout, then
- * persists each set with sessionId via recordSet, and ends the session
- * when finished.
+ * Flow (standard / bilateral):
+ *   work phase ends → stub set written with reps=null  → rest begins →
+ *   reps prompt appears → user enters reps → stub updated → next work begins.
+ * After the final work, any sets still missing reps trigger a single modal
+ * to fill them in before the session is finalized.
  */
 export async function SessionView(params, root) {
   const exerciseId = Number(params.exerciseId);
@@ -37,97 +42,181 @@ export async function SessionView(params, root) {
   if (ex.setType === "continuous") return renderContinuous({ ex, sessionId, root });
 }
 
-/* ---------------------------------------------------------- standard */
+/* ----------------------------------------------------- shared helpers */
+
+/** A persistent reps prompt panel that swaps between "enter" and "saved" states. */
+function makeRepsPanel({ defaultReps = 8, setType }) {
+  const root = h("div", { class: "stack" });
+  let currentRound = null;
+  let currentSetId = null;
+  let onSave = null;
+
+  function clear() {
+    root.innerHTML = "";
+    currentRound = null;
+    currentSetId = null;
+    onSave = null;
+  }
+
+  function showPrompt({ round, setId, hint, onSave: cb }) {
+    currentRound = round;
+    currentSetId = setId;
+    onSave = cb;
+    root.innerHTML = "";
+    let value = defaultReps;
+    const stp = stepper({ value, step: 1, onChange: (n) => { value = n; } });
+    const label = setType === "bilateral" ? `Round ${round} — reps per side` : `Round ${round} — reps`;
+    root.appendChild(h("div", { class: "card stack-sm" }, [
+      eyebrow(hint || "How many reps did you complete?"),
+      field(label, stp),
+      h("button", { class: "btn btn-primary btn-block", onclick: async () => {
+        await cb(value);
+        showSaved({ round, reps: value });
+      } }, `Save round ${round}`)
+    ]));
+  }
+
+  function showSaved({ round, reps }) {
+    root.innerHTML = "";
+    root.appendChild(h("div", { class: "card card-tight body-s row-between" }, [
+      h("span", {}, `Round ${round} saved`),
+      h("span", { class: "mono" }, `${reps} reps`)
+    ]));
+  }
+
+  function showIdle(text) {
+    root.innerHTML = "";
+    root.appendChild(h("div", { class: "card card-tight body-s", style: "color: var(--ink-mute); text-align:center" }, text));
+  }
+
+  return { el: root, clear, showPrompt, showSaved, showIdle, get currentRound() { return currentRound; }, get currentSetId() { return currentSetId; } };
+}
+
+/** Modal that prompts for reps for any rounds still missing them. */
+function promptMissingReps(missing, { setType }) {
+  return new Promise((resolve) => {
+    const refs = missing.map((s) => ({ setId: s.id, round: s.round, value: 8 }));
+    const fields = refs.map((r) => {
+      const stp = stepper({ value: r.value, step: 1, onChange: (n) => { r.value = n; } });
+      const lbl = setType === "bilateral" ? `Round ${r.round} reps per side` : `Round ${r.round} reps`;
+      return field(lbl, stp);
+    });
+    const m = modal([
+      eyebrow("Before we save"),
+      h("h2", { class: "display-m" }, missing.length === 1 ? "1 round needs reps" : `${missing.length} rounds need reps`),
+      h("p", { class: "body-s", style: "color: var(--ink-mute)" }, "Fill these in and we'll wrap up the session."),
+      ...fields,
+      h("button", { class: "btn btn-primary btn-block btn-lg", onclick: async () => {
+        for (const r of refs) await updateSet(r.setId, { reps: r.value });
+        m.close();
+        resolve();
+      } }, "Save all & finish")
+    ]);
+  });
+}
+
+/* ----------------------------------------------------- standard */
 
 function renderStandard({ ex, sessionId, root }) {
   const phases = standardPhases(ex.rounds);
   const ring = renderTimerRing(60);
   const engine = makeIntervalEngine(phases);
-  let currentRound = 1;
 
   const weight = { value: ex.workingWeight || 0 };
-  const reps = { value: 8 };
+  const setIds = new Map(); // round → setId
 
   const weightInput = stepper({ value: weight.value, step: 1, onChange: (n) => weight.value = n });
-  const repsInput = stepper({ value: reps.value, step: 1, onChange: (n) => reps.value = n });
+  const repsPanel = makeRepsPanel({ defaultReps: 8, setType: "standard" });
+  repsPanel.showIdle("Reps prompt appears between sets.");
 
-  const inputs = h("div", { class: "stack" }, [
-    eyebrow(`Round 1 of ${ex.rounds}`),
-    field("Weight (kg)", weightInput),
-    field("Reps", repsInput)
-  ]);
-  const inputsLabel = inputs.querySelector(".eyebrow");
-
-  const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg", onclick: () => {
-    unlockAudio();
-    engine.start();
-    startBtn.classList.add("hidden");
-    skipBtn.classList.remove("hidden");
-  } }, "Start");
-
+  const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "Skip phase");
-
   const finishBtn = h("button", { class: "btn btn-primary btn-block btn-lg hidden", onclick: async () => {
     await updateExercise(ex.id, { workingWeight: weight.value });
     await endSession(sessionId);
     location.hash = `#/exercise/${ex.id}`;
   } }, "Finish & save");
 
+  startBtn.addEventListener("click", () => {
+    unlockAudio();
+    engine.start();
+    startBtn.classList.add("hidden");
+    skipBtn.classList.remove("hidden");
+  });
   ring.el.addEventListener("click", () => engine.skip());
 
-  engine.onPhase(({ phase }) => {
-    ring.setPhase(phase.label, phase.seconds);
-    if (phase.kind === "work") {
-      currentRound = phase.round;
-      inputsLabel.textContent = `Round ${currentRound} of ${ex.rounds}`;
-    }
-  });
-  engine.onTick(({ remaining }) => ring.setRemaining(remaining));
-  engine.onPhase(async ({ phase }) => {
-    // record the just-completed work set when entering rest, OR keep last work for end.
-    // We record on phase change *out of* a work block — easier: record at chime *after* a work phase ends.
-  });
-
-  // We record at the end of every WORK phase. We hook into engine by wrapping skip/auto: use phase change
-  // to detect leaving a work phase via observing the previous phase index ourselves.
   let lastPhaseIdx = -1;
-  engine.onPhase(({ index }) => {
+
+  engine.onPhase(async ({ phase, index }) => {
+    ring.setPhase(phase.label, phase.seconds);
+
     const prev = lastPhaseIdx;
     lastPhaseIdx = index;
-    if (prev >= 0 && phases[prev]?.kind === "work") {
-      // previous phase was work → record the set we just finished
-      recordSet({
+    const prevPhase = phases[prev];
+
+    if (prev >= 0 && prevPhase?.kind === "work") {
+      // Just finished a work phase — write a stub for that round.
+      const round = prevPhase.round;
+      const setId = await recordSet({
         sessionId,
         exerciseId: ex.id,
-        round: phases[prev].round,
+        round,
         weight: weight.value,
-        reps: reps.value,
+        reps: null,
         setType: "standard"
       });
+      setIds.set(round, setId);
+
+      // If we're now in rest, surface the reps prompt for the round we just finished.
+      if (phase.kind === "rest") {
+        repsPanel.showPrompt({
+          round,
+          setId,
+          hint: `Round ${round} done — log the reps`,
+          onSave: async (reps) => updateSet(setId, { reps })
+        });
+      }
+    } else if (phase.kind === "work") {
+      // Starting a new work phase. If a previous prompt is still open and the user
+      // didn't save it, we leave its data as null — the missing-reps modal will catch it.
+      repsPanel.showIdle(`Round ${phase.round} in progress…`);
     }
   });
 
-  engine.onDone(() => {
-    // record final work phase (no phase change fires after the last one)
+  engine.onTick(({ remaining }) => ring.setRemaining(remaining));
+
+  engine.onDone(async () => {
+    // Final work phase has no following phase, so write its stub here.
     const last = phases[phases.length - 1];
     if (last?.kind === "work") {
-      recordSet({
+      const round = last.round;
+      const setId = await recordSet({
         sessionId,
         exerciseId: ex.id,
-        round: last.round,
+        round,
         weight: weight.value,
-        reps: reps.value,
+        reps: null,
         setType: "standard"
       });
+      setIds.set(round, setId);
     }
     skipBtn.classList.add("hidden");
-    finishBtn.classList.remove("hidden");
     ring.setPhase("DONE", 0);
+
+    const all = await setsForSession(sessionId);
+    const missing = all.filter((s) => s.reps == null).sort((a, b) => a.round - b.round);
+    if (missing.length > 0) {
+      await promptMissingReps(missing, { setType: "standard" });
+    }
+    repsPanel.showIdle("All sets logged. Finish to save.");
+    finishBtn.classList.remove("hidden");
   });
 
   root.appendChild(ring.el);
   root.appendChild(h("div", { style: "height:24px" }));
-  root.appendChild(inputs);
+  root.appendChild(field("Weight (kg)", weightInput));
+  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(repsPanel.el);
   root.appendChild(h("div", { style: "height:24px" }));
   root.appendChild(startBtn);
   root.appendChild(skipBtn);
@@ -136,7 +225,7 @@ function renderStandard({ ex, sessionId, root }) {
   return () => engine.stop();
 }
 
-/* ---------------------------------------------------------- bilateral */
+/* ----------------------------------------------------- bilateral */
 
 function renderBilateral({ ex, sessionId, root }) {
   const phases = bilateralPhases(3);
@@ -144,24 +233,13 @@ function renderBilateral({ ex, sessionId, root }) {
   const engine = makeIntervalEngine(phases);
 
   const weight = { value: ex.workingWeight || 0 };
-  const reps = { value: 8 };
+  const setIds = new Map();
 
   const weightInput = stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
-  const repsInput = stepper({ value: reps.value, step: 1, onChange: (n) => reps.value = n });
+  const repsPanel = makeRepsPanel({ defaultReps: 8, setType: "bilateral" });
+  repsPanel.showIdle("Reps prompt appears after each round.");
 
-  const inputs = h("div", { class: "stack" }, [
-    eyebrow("Round 1 of 3 — one rep count per round (assumed equal L/R)"),
-    field("Weight per side (kg)", weightInput),
-    field("Reps per side", repsInput)
-  ]);
-  const inputsLabel = inputs.querySelector(".eyebrow");
-
-  const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg", onclick: () => {
-    unlockAudio();
-    engine.start();
-    startBtn.classList.add("hidden");
-    skipBtn.classList.remove("hidden");
-  } }, "Start");
+  const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "Skip phase");
   const finishBtn = h("button", { class: "btn btn-primary btn-block btn-lg hidden", onclick: async () => {
     await updateExercise(ex.id, { workingWeight: weight.value });
@@ -169,57 +247,82 @@ function renderBilateral({ ex, sessionId, root }) {
     location.hash = `#/exercise/${ex.id}`;
   } }, "Finish & save");
 
+  startBtn.addEventListener("click", () => {
+    unlockAudio();
+    engine.start();
+    startBtn.classList.add("hidden");
+    skipBtn.classList.remove("hidden");
+  });
   ring.el.addEventListener("click", () => engine.skip());
 
-  engine.onPhase(({ phase }) => {
-    ring.setPhase(phase.label, phase.seconds);
-    if (phase.kind === "work" && phase.side === "L") {
-      inputsLabel.textContent = `Round ${phase.round} of 3 — left side`;
-    } else if (phase.kind === "work" && phase.side === "R") {
-      inputsLabel.textContent = `Round ${phase.round} of 3 — right side`;
-    }
-  });
-  engine.onTick(({ remaining }) => ring.setRemaining(remaining));
-
-  // Record one bilateral set per round, when the second-side work phase ends.
-  // (Volume math doubles weight × reps for L+R together — see domain/volume.js.)
   let lastPhaseIdx = -1;
-  engine.onPhase(({ index }) => {
+
+  engine.onPhase(async ({ phase, index }) => {
+    ring.setPhase(phase.label, phase.seconds);
+
     const prev = lastPhaseIdx;
     lastPhaseIdx = index;
     const prevPhase = phases[prev];
+
+    // A bilateral round is "complete" when the R-side work phase ends. Write the
+    // stub then — one set per round, mirroring the standard handler.
     if (prev >= 0 && prevPhase?.kind === "work" && prevPhase?.side === "R") {
-      recordSet({
+      const round = prevPhase.round;
+      const setId = await recordSet({
         sessionId,
         exerciseId: ex.id,
-        round: prevPhase.round,
+        round,
         weight: weight.value,
-        reps: reps.value,
+        reps: null,
         setType: "bilateral"
       });
+      setIds.set(round, setId);
+      if (phase.kind === "rest") {
+        repsPanel.showPrompt({
+          round,
+          setId,
+          hint: `Round ${round} done — log reps per side`,
+          onSave: async (reps) => updateSet(setId, { reps })
+        });
+      }
+    } else if (phase.kind === "work" && phase.side === "L") {
+      repsPanel.showIdle(`Round ${phase.round} in progress…`);
     }
   });
 
-  engine.onDone(() => {
+  engine.onTick(({ remaining }) => ring.setRemaining(remaining));
+
+  engine.onDone(async () => {
     const last = phases[phases.length - 1];
     if (last?.kind === "work" && last.side === "R") {
-      recordSet({
+      const round = last.round;
+      const setId = await recordSet({
         sessionId,
         exerciseId: ex.id,
-        round: last.round,
+        round,
         weight: weight.value,
-        reps: reps.value,
+        reps: null,
         setType: "bilateral"
       });
+      setIds.set(round, setId);
     }
     skipBtn.classList.add("hidden");
-    finishBtn.classList.remove("hidden");
     ring.setPhase("DONE", 0);
+
+    const all = await setsForSession(sessionId);
+    const missing = all.filter((s) => s.reps == null).sort((a, b) => a.round - b.round);
+    if (missing.length > 0) {
+      await promptMissingReps(missing, { setType: "bilateral" });
+    }
+    repsPanel.showIdle("All rounds logged. Finish to save.");
+    finishBtn.classList.remove("hidden");
   });
 
   root.appendChild(ring.el);
   root.appendChild(h("div", { style: "height:24px" }));
-  root.appendChild(inputs);
+  root.appendChild(field("Weight per side (kg)", weightInput));
+  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(repsPanel.el);
   root.appendChild(h("div", { style: "height:24px" }));
   root.appendChild(startBtn);
   root.appendChild(skipBtn);
@@ -228,7 +331,10 @@ function renderBilateral({ ex, sessionId, root }) {
   return () => engine.stop();
 }
 
-/* ---------------------------------------------------------- continuous */
+/* ----------------------------------------------------- continuous */
+// Continuous is a single 10-min block with live tap counting — there is no
+// rest period to insert a rep prompt into, so the original flow is preserved:
+// the user taps reps live, then hits Finish to save the single set.
 
 function renderContinuous({ ex, sessionId, root }) {
   const phases = continuousPhases();

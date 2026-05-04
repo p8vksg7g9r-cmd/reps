@@ -31,7 +31,9 @@ export async function HistoryView(_params, root) {
 
   const body = h("div", { class: "stack" });
 
-  const [sessions, sets, exercises] = await Promise.all([allSessions(), allSets(), listExercises()]);
+  const [sessions, allSetsRaw, exercises] = await Promise.all([allSessions(), allSets(), listExercises()]);
+  // Drop stub sets where reps were never filled in (abandoned mid-session).
+  const sets = allSetsRaw.filter((s) => s.reps != null);
   const exById = new Map(exercises.map((e) => [e.id, e]));
 
   function filtered() {

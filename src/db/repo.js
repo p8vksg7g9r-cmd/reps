@@ -123,6 +123,15 @@ export async function recordSet(set) {
   return id;
 }
 
+export async function updateSet(id, patch) {
+  const t = await tx(["sets"], "readwrite");
+  const store = t.objectStore("sets");
+  const cur = await reqAsPromise(store.get(id));
+  if (!cur) throw new Error("set not found");
+  store.put({ ...cur, ...patch });
+  await txDone(t);
+}
+
 export async function setsForSession(sessionId) {
   const t = await tx(["sets"]);
   return reqAsPromise(t.objectStore("sets").index("by_sessionId").getAll(sessionId));
