@@ -55,8 +55,9 @@ export function modal(content, { onClose } = {}) {
   };
 }
 
-export function stepper({ value = 0, step = 1, min = 0, onChange }) {
-  const input = h("input", { type: "number", value: String(value), inputmode: "decimal" });
+export function stepper({ value, step = 1, min = 0, onChange, placeholder = "" }) {
+  const initial = value == null || value === "" ? "" : String(value);
+  const input = h("input", { type: "number", value: initial, inputmode: "decimal", placeholder });
   const dec = h("button", { type: "button", "aria-label": "Decrease" }, "−");
   const inc = h("button", { type: "button", "aria-label": "Increase" }, "+");
   function commit(n) {
@@ -65,9 +66,15 @@ export function stepper({ value = 0, step = 1, min = 0, onChange }) {
     input.value = String(n);
     onChange?.(n);
   }
-  dec.addEventListener("click", () => commit(Number(input.value) - step));
-  inc.addEventListener("click", () => commit(Number(input.value) + step));
-  input.addEventListener("change", () => commit(Number(input.value)));
+  dec.addEventListener("click", () => commit(Number(input.value || 0) - step));
+  inc.addEventListener("click", () => commit(Number(input.value || 0) + step));
+  input.addEventListener("change", () => {
+    if (input.value === "") { onChange?.(null); return; }
+    commit(Number(input.value));
+  });
+  input.addEventListener("input", () => {
+    if (input.value === "") onChange?.(null);
+  });
   return h("div", { class: "stepper" }, [dec, input, inc]);
 }
 

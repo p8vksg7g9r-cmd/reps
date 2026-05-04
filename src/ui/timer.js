@@ -183,7 +183,10 @@ export function renderTimerRing(initial = 60) {
     setRemaining(remaining) {
       cd.textContent = fmt(remaining);
       const pct = totalForPhase > 0 ? remaining / totalForPhase : 0;
-      ring.setAttribute("stroke-dashoffset", String(C * (1 - pct)));
+      // Negative dashoffset rotates the gap so the empty arc grows clockwise
+      // from 12 o'clock as time elapses (rather than the trailing edge
+      // receding counter-clockwise).
+      ring.setAttribute("stroke-dashoffset", String(-(C * (1 - pct))));
     }
   };
 }

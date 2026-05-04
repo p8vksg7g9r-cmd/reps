@@ -198,6 +198,20 @@
 }
 .stepper input::-webkit-outer-spin-button,
 .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper input::placeholder { color: var(--ink-mute); font-weight: 400; }
+.stepper.locked { opacity: 0.55; background: rgba(15, 35, 64, 0.04); }
+.stepper.locked button { pointer-events: none; color: var(--ink-mute); }
+.stepper.locked input { pointer-events: none; }
+
+/* Completed-sets running log inside the active session view */
+.completed-log .row {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+.completed-log .row .lbl { color: var(--ink-soft); }
+.completed-log .row .val { color: var(--ink); font-weight: 600; }
 
 /* Tab bar */
 .tabbar {

@@ -9,17 +9,6 @@ import {
 } from "../ui/timer.js";
 import { makeTapCounter } from "../ui/tap-counter.js";
 
-/**
- * Session flow (standard / bilateral):
- *   Pre-Start screen — exercise name, "Set N of N · ready", "Last time avg: X reps",
- *                      weight stepper, Start button. NO reps input visible.
- *   On Start        — startSession() runs; engine starts; timer ring becomes active.
- *   Work phase      — set indicator updates to "Set N of N · working".
- *   Work ends       — stub set written (reps=null) for durability.
- *   Rest phase      — reps prompt slides in; user enters reps for the set just done.
- *   Final set ends  — any rounds still missing reps are gathered into one modal
- *                     before the session is finalized.
- */
 export async function SessionView(params, root) {
   const exerciseId = Number(params.exerciseId);
   const ex = await getExercise(exerciseId);
@@ -28,8 +17,6 @@ export async function SessionView(params, root) {
     return;
   }
 
-  // Compute the previous session's average reps BEFORE creating a new session,
-  // so the lookup never returns the in-progress one.
   const lastAvg = await computeLastAvg(exerciseId);
 
   const head = h("div", { class: "page-head" }, [
@@ -47,7 +34,6 @@ export async function SessionView(params, root) {
 
 /* ----------------------------------------------------- helpers */
 
-/** Average reps across the most recent prior session for an exercise. Null if none. */
 async function computeLastAvg(exerciseId) {
   const last = await lastSessionForExercise(exerciseId);
   if (!last) return null;
@@ -57,7 +43,6 @@ async function computeLastAvg(exerciseId) {
   return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
 }
 
-/** Set-indicator card with eyebrow status + last-time reference. Mutable in place. */
 function makeSetIndicator(initialEyebrow, lastAvg) {
   const eb = eyebrow(initialEyebrow);
   const sub = lastAvg != null
@@ -65,13 +50,34 @@ function makeSetIndicator(initialEyebrow, lastAvg) {
         `Last time avg: ${lastAvg} reps`)
     : null;
   const card = h("div", { class: "card stack-sm" }, [eb, sub].filter(Boolean));
-  return {
-    el: card,
-    set(text) { eb.textContent = text; }
-  };
+  return { el: card, set(text) { eb.textContent = text; } };
 }
 
-/** Reps prompt panel — hidden until showPrompt() is called, then either prompt or saved-state. */
+/** Running log of completed sets shown below the timer. Hidden until the first save. */
+function makeCompletedLog({ unitLabel = "Set" } = {}) {
+  const eb = eyebrow("Completed");
+  const rows = h("div");
+  const card = h("div", { class: "card stack-sm completed-log hidden" }, [eb, rows]);
+  const seen = new Map(); // round → row element
+
+  function upsert(round, reps) {
+    card.classList.remove("hidden");
+    const text = `${reps} reps`;
+    if (seen.has(round)) {
+      seen.get(round).querySelector(".val").textContent = text;
+      return;
+    }
+    const row = h("div", { class: "row" }, [
+      h("span", { class: "lbl" }, `${unitLabel} ${round}`),
+      h("span", { class: "val" }, text)
+    ]);
+    rows.appendChild(row);
+    seen.set(round, row);
+  }
+  return { el: card, upsert };
+}
+
+/** Reps prompt panel. Starts BLANK each time it's shown — no pre-fill. */
 function makeRepsPanel({ setType }) {
   const root = h("div", { class: "hidden" });
 
@@ -80,19 +86,30 @@ function makeRepsPanel({ setType }) {
     root.innerHTML = "";
   }
 
-  function showPrompt({ round, hint, defaultReps, onSave }) {
+  function showPrompt({ round, hint, onSave }) {
     root.classList.remove("hidden");
     root.innerHTML = "";
-    let value = defaultReps;
-    const stp = stepper({ value, step: 1, onChange: (n) => { value = n; } });
+    let value = null;
+    const stp = stepper({
+      value: "",                      // start blank
+      step: 1,
+      placeholder: "—",
+      onChange: (n) => { value = n; }
+    });
     const label = setType === "bilateral" ? `Round ${round} — reps per side` : `Set ${round} — reps`;
+    const saveBtn = h("button", { class: "btn btn-primary btn-block" }, `Save set ${round}`);
+    saveBtn.onclick = async () => {
+      if (value == null || !Number.isFinite(value) || value < 1) {
+        alert("Enter the number of reps you completed.");
+        return;
+      }
+      await onSave(value);
+      showSaved({ round, reps: value });
+    };
     root.appendChild(h("div", { class: "card stack-sm" }, [
       eyebrow(hint),
       field(label, stp),
-      h("button", { class: "btn btn-primary btn-block", onclick: async () => {
-        await onSave(value);
-        showSaved({ round, reps: value });
-      } }, `Save set ${round}`)
+      saveBtn
     ]));
   }
 
@@ -100,7 +117,7 @@ function makeRepsPanel({ setType }) {
     root.classList.remove("hidden");
     root.innerHTML = "";
     root.appendChild(h("div", { class: "card card-tight body-s row-between" }, [
-      h("span", {}, `Set ${round} saved`),
+      h("span", {}, `${setType === "bilateral" ? "Round" : "Set"} ${round} saved`),
       h("span", { class: "mono" }, `${reps} reps`)
     ]));
   }
@@ -114,27 +131,49 @@ function makeRepsPanel({ setType }) {
   return { el: root, clear, showPrompt, showSaved, showText };
 }
 
-function promptMissingReps(missing, { setType, lastAvg }) {
-  const fallback = lastAvg ?? 8;
+/** Modal for any sets that didn't get reps entered during their rest period. Blank entries. */
+function promptMissingReps(missing, { setType }) {
   return new Promise((resolve) => {
-    const refs = missing.map((s) => ({ setId: s.id, round: s.round, value: fallback }));
+    const refs = missing.map((s) => ({ setId: s.id, round: s.round, value: null }));
     const fields = refs.map((r) => {
-      const stp = stepper({ value: r.value, step: 1, onChange: (n) => { r.value = n; } });
+      const stp = stepper({
+        value: "",
+        step: 1,
+        placeholder: "—",
+        onChange: (n) => { r.value = n; }
+      });
       const lbl = setType === "bilateral" ? `Round ${r.round} reps per side` : `Set ${r.round} reps`;
       return field(lbl, stp);
     });
+    const saveAll = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Save all & finish");
+    saveAll.onclick = async () => {
+      for (const r of refs) {
+        if (r.value == null || !Number.isFinite(r.value) || r.value < 1) {
+          alert("Fill in reps for every set before saving.");
+          return;
+        }
+      }
+      for (const r of refs) await updateSet(r.setId, { reps: r.value });
+      m.close();
+      resolve();
+    };
     const m = modal([
       eyebrow("Before we save"),
       h("h2", { class: "display-m" }, missing.length === 1 ? "1 set needs reps" : `${missing.length} sets need reps`),
       h("p", { class: "body-s", style: "color: var(--ink-mute)" }, "Fill these in and we'll wrap up the session."),
       ...fields,
-      h("button", { class: "btn btn-primary btn-block btn-lg", onclick: async () => {
-        for (const r of refs) await updateSet(r.setId, { reps: r.value });
-        m.close();
-        resolve();
-      } }, "Save all & finish")
+      saveAll
     ]);
   });
+}
+
+/** Lock a stepper element so it becomes read-only (visual + behavior). */
+function lockStepper(stepperEl) {
+  if (!stepperEl) return;
+  stepperEl.classList.add("locked");
+  stepperEl.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+  const input = stepperEl.querySelector("input");
+  if (input) { input.readOnly = true; input.tabIndex = -1; }
 }
 
 /* ----------------------------------------------------- standard */
@@ -150,7 +189,9 @@ function renderStandard({ ex, lastAvg, root }) {
   const setIds = new Map();
 
   const indicator = makeSetIndicator(`Set 1 of ${ex.rounds} · ready`, lastAvg);
-  const weightInput = stepper({ value: weight.value, step: 1, onChange: (n) => weight.value = n });
+  const weightStepper = stepper({ value: weight.value, step: 1, onChange: (n) => weight.value = n });
+  const weightFieldEl = field("Weight (kg)", weightStepper);
+  const completed = makeCompletedLog({ unitLabel: "Set" });
   const repsPanel = makeRepsPanel({ setType: "standard" });
 
   const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
@@ -163,6 +204,7 @@ function renderStandard({ ex, lastAvg, root }) {
 
   startBtn.addEventListener("click", async () => {
     sessionId = await startSession(ex.id);
+    lockStepper(weightStepper);                 // weight is frozen for the rest of the exercise
     unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
@@ -181,12 +223,8 @@ function renderStandard({ ex, lastAvg, root }) {
     if (prev >= 0 && prevPhase?.kind === "work") {
       const round = prevPhase.round;
       const setId = await recordSet({
-        sessionId,
-        exerciseId: ex.id,
-        round,
-        weight: weight.value,
-        reps: null,
-        setType: "standard"
+        sessionId, exerciseId: ex.id, round,
+        weight: weight.value, reps: null, setType: "standard"
       });
       setIds.set(round, setId);
 
@@ -195,8 +233,10 @@ function renderStandard({ ex, lastAvg, root }) {
         repsPanel.showPrompt({
           round,
           hint: `Set ${round} done — log the reps`,
-          defaultReps: lastAvg ?? 8,
-          onSave: async (reps) => updateSet(setId, { reps })
+          onSave: async (reps) => {
+            await updateSet(setId, { reps });
+            completed.upsert(round, reps);
+          }
         });
       }
     } else if (phase.kind === "work") {
@@ -212,12 +252,8 @@ function renderStandard({ ex, lastAvg, root }) {
     if (last?.kind === "work") {
       const round = last.round;
       const setId = await recordSet({
-        sessionId,
-        exerciseId: ex.id,
-        round,
-        weight: weight.value,
-        reps: null,
-        setType: "standard"
+        sessionId, exerciseId: ex.id, round,
+        weight: weight.value, reps: null, setType: "standard"
       });
       setIds.set(round, setId);
     }
@@ -228,7 +264,10 @@ function renderStandard({ ex, lastAvg, root }) {
     const all = await setsForSession(sessionId);
     const missing = all.filter((s) => s.reps == null).sort((a, b) => a.round - b.round);
     if (missing.length > 0) {
-      await promptMissingReps(missing, { setType: "standard", lastAvg });
+      await promptMissingReps(missing, { setType: "standard" });
+      // After modal saves, refresh completed log with the freshly-filled values.
+      const fresh = await setsForSession(sessionId);
+      for (const s of fresh) if (s.reps != null) completed.upsert(s.round, s.reps);
     }
     repsPanel.showText("All sets logged. Finish to save.");
     finishBtn.classList.remove("hidden");
@@ -236,8 +275,10 @@ function renderStandard({ ex, lastAvg, root }) {
 
   root.appendChild(indicator.el);
   root.appendChild(ring.el);
-  root.appendChild(h("div", { style: "height:24px" }));
-  root.appendChild(field("Weight (kg)", weightInput));
+  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(completed.el);
+  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(weightFieldEl);
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(repsPanel.el);
   root.appendChild(h("div", { style: "height:24px" }));
@@ -261,7 +302,9 @@ function renderBilateral({ ex, lastAvg, root }) {
   const setIds = new Map();
 
   const indicator = makeSetIndicator("Round 1 of 3 · ready", lastAvg);
-  const weightInput = stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
+  const weightStepper = stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
+  const weightFieldEl = field("Weight per side (kg)", weightStepper);
+  const completed = makeCompletedLog({ unitLabel: "Round" });
   const repsPanel = makeRepsPanel({ setType: "bilateral" });
 
   const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
@@ -274,6 +317,7 @@ function renderBilateral({ ex, lastAvg, root }) {
 
   startBtn.addEventListener("click", async () => {
     sessionId = await startSession(ex.id);
+    lockStepper(weightStepper);
     unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
@@ -292,12 +336,8 @@ function renderBilateral({ ex, lastAvg, root }) {
     if (prev >= 0 && prevPhase?.kind === "work" && prevPhase?.side === "R") {
       const round = prevPhase.round;
       const setId = await recordSet({
-        sessionId,
-        exerciseId: ex.id,
-        round,
-        weight: weight.value,
-        reps: null,
-        setType: "bilateral"
+        sessionId, exerciseId: ex.id, round,
+        weight: weight.value, reps: null, setType: "bilateral"
       });
       setIds.set(round, setId);
       if (phase.kind === "rest") {
@@ -305,8 +345,10 @@ function renderBilateral({ ex, lastAvg, root }) {
         repsPanel.showPrompt({
           round,
           hint: `Round ${round} done — log reps per side`,
-          defaultReps: lastAvg ?? 8,
-          onSave: async (reps) => updateSet(setId, { reps })
+          onSave: async (reps) => {
+            await updateSet(setId, { reps });
+            completed.upsert(round, reps);
+          }
         });
       }
     } else if (phase.kind === "work") {
@@ -323,12 +365,8 @@ function renderBilateral({ ex, lastAvg, root }) {
     if (last?.kind === "work" && last.side === "R") {
       const round = last.round;
       const setId = await recordSet({
-        sessionId,
-        exerciseId: ex.id,
-        round,
-        weight: weight.value,
-        reps: null,
-        setType: "bilateral"
+        sessionId, exerciseId: ex.id, round,
+        weight: weight.value, reps: null, setType: "bilateral"
       });
       setIds.set(round, setId);
     }
@@ -339,7 +377,9 @@ function renderBilateral({ ex, lastAvg, root }) {
     const all = await setsForSession(sessionId);
     const missing = all.filter((s) => s.reps == null).sort((a, b) => a.round - b.round);
     if (missing.length > 0) {
-      await promptMissingReps(missing, { setType: "bilateral", lastAvg });
+      await promptMissingReps(missing, { setType: "bilateral" });
+      const fresh = await setsForSession(sessionId);
+      for (const s of fresh) if (s.reps != null) completed.upsert(s.round, s.reps);
     }
     repsPanel.showText("All rounds logged. Finish to save.");
     finishBtn.classList.remove("hidden");
@@ -347,8 +387,10 @@ function renderBilateral({ ex, lastAvg, root }) {
 
   root.appendChild(indicator.el);
   root.appendChild(ring.el);
-  root.appendChild(h("div", { style: "height:24px" }));
-  root.appendChild(field("Weight per side (kg)", weightInput));
+  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(completed.el);
+  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(weightFieldEl);
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(repsPanel.el);
   root.appendChild(h("div", { style: "height:24px" }));
@@ -360,9 +402,6 @@ function renderBilateral({ ex, lastAvg, root }) {
 }
 
 /* ----------------------------------------------------- continuous */
-// Continuous has no rest period to insert a per-set prompt into. The tap counter
-// IS the rep recorder, so it stays — but it's hidden until Start is pressed,
-// keeping the pre-set screen free of any rep UI.
 
 function renderContinuous({ ex, lastAvg, root }) {
   const phases = continuousPhases();
@@ -376,19 +415,16 @@ function renderContinuous({ ex, lastAvg, root }) {
   const tapWrap = h("div", { class: "hidden" }, [tap.el, h("p", { class: "tap-hint" }, "Tap to count · long-press to undo")]);
 
   const indicator = makeSetIndicator("10-minute block · ready", lastAvg);
-  const weightInput = stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
+  const weightStepper = stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
+  const weightFieldEl = field("Weight (kg)", weightStepper);
 
   const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "End early");
   const finishBtn = h("button", { class: "btn btn-primary btn-block btn-lg hidden", onclick: async () => {
     if (!sessionId) return;
     await recordSet({
-      sessionId,
-      exerciseId: ex.id,
-      round: 1,
-      weight: weight.value,
-      reps: tap.count,
-      setType: "continuous"
+      sessionId, exerciseId: ex.id, round: 1,
+      weight: weight.value, reps: tap.count, setType: "continuous"
     });
     await updateExercise(ex.id, { workingWeight: weight.value });
     await endSession(sessionId);
@@ -397,6 +433,7 @@ function renderContinuous({ ex, lastAvg, root }) {
 
   startBtn.addEventListener("click", async () => {
     sessionId = await startSession(ex.id);
+    lockStepper(weightStepper);
     unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
@@ -417,7 +454,7 @@ function renderContinuous({ ex, lastAvg, root }) {
   root.appendChild(indicator.el);
   root.appendChild(ring.el);
   root.appendChild(h("div", { style: "height:16px" }));
-  root.appendChild(field("Weight (kg)", weightInput));
+  root.appendChild(weightFieldEl);
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(tapWrap);
   root.appendChild(h("div", { style: "height:16px" }));
