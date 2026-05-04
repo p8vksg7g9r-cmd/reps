@@ -1,5 +1,6 @@
 import { getProfile, saveProfile, listWeights, logWeight, exportAll, importAll } from "../db/repo.js";
 import { h, eyebrow, field, fmtKg, fmtAge } from "../ui/components.js";
+import { APP_VERSION } from "../app.js";
 
 export async function ProfileView(_params, root) {
   const [profile, weights] = await Promise.all([getProfile(), listWeights()]);
@@ -86,8 +87,14 @@ export async function ProfileView(_params, root) {
     ])
   ]);
 
+  const settingsCard = h("div", { class: "card stack" }, [
+    eyebrow("Settings"),
+    h("a", { href: "#/manage-exercises", class: "btn btn-ghost btn-block" }, "Manage exercises")
+  ]);
+
   root.appendChild(head);
-  root.appendChild(h("div", { class: "stack" }, [profileCard, weightCard, backupCard]));
+  root.appendChild(h("div", { class: "stack" }, [profileCard, weightCard, settingsCard, backupCard]));
+  root.appendChild(h("div", { class: "version-footer" }, `REPS · ${APP_VERSION}`));
 
   async function doExport() {
     const data = await exportAll();

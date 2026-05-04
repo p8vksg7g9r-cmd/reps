@@ -12,7 +12,7 @@ export const STARTER_EXERCISES = [
   { name: "Lateral Raises",                     setType: "standard",  rounds: 3, standardKey: "db_lateral_raise" },
   { name: "Seated Leg Curl",                    setType: "standard",  rounds: 3, standardKey: "leg_curl" },
   { name: "Seated Leg Extension",               setType: "standard",  rounds: 3, standardKey: "leg_extension" },
-  { name: "Back Extension",                     setType: "standard",  rounds: 3, standardKey: null },
+  { name: "Back Extension",                     setType: "standard",  rounds: 3, standardKey: null, bodyweight: true },
 
   // Bilateral set type (3 rounds: work-L / work-R / rest)
   { name: "Standing Dumbbell Curl",             setType: "bilateral", rounds: 3, standardKey: "db_curl" },

@@ -167,13 +167,22 @@ function promptMissingReps(missing, { setType }) {
   });
 }
 
-/** Lock a stepper element so it becomes read-only (visual + behavior). */
+/** Lock a stepper element + tag its field label so it's unmistakably read-only. */
 function lockStepper(stepperEl) {
   if (!stepperEl) return;
   stepperEl.classList.add("locked");
-  stepperEl.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+  stepperEl.querySelectorAll("button").forEach((b) => { b.disabled = true; b.tabIndex = -1; });
   const input = stepperEl.querySelector("input");
-  if (input) { input.readOnly = true; input.tabIndex = -1; }
+  if (input) { input.disabled = true; input.tabIndex = -1; input.setAttribute("aria-readonly", "true"); }
+}
+
+function lockField(fieldEl, stepperEl) {
+  lockStepper(stepperEl);
+  const labelEl = fieldEl?.querySelector(".label");
+  if (labelEl && !labelEl.querySelector(".lock-tag")) {
+    const tag = h("span", { class: "lock-tag" }, "LOCKED");
+    labelEl.appendChild(tag);
+  }
 }
 
 /* ----------------------------------------------------- standard */
@@ -185,12 +194,16 @@ function renderStandard({ ex, lastAvg, root }) {
   const engine = makeIntervalEngine(phases);
 
   let sessionId = null;
-  const weight = { value: ex.workingWeight || 0 };
+  const weight = { value: ex.bodyweight ? 0 : (ex.workingWeight || 0) };
   const setIds = new Map();
 
   const indicator = makeSetIndicator(`Set 1 of ${ex.rounds} · ready`, lastAvg);
-  const weightStepper = stepper({ value: weight.value, step: 1, onChange: (n) => weight.value = n });
-  const weightFieldEl = field("Weight (kg)", weightStepper);
+  const weightStepper = ex.bodyweight ? null : stepper({ value: weight.value, step: 1, onChange: (n) => weight.value = n });
+  const weightFieldEl = ex.bodyweight ? null : field("Weight (kg)", weightStepper);
+  const bodyweightBadge = ex.bodyweight ? h("div", { class: "card card-tight body-s row", style: "justify-content:center; gap:8px" }, [
+    h("span", { class: "badge badge-brass" }, "Bodyweight"),
+    h("span", { style: "color: var(--ink-mute)" }, "no external load")
+  ]) : null;
   const completed = makeCompletedLog({ unitLabel: "Set" });
   const repsPanel = makeRepsPanel({ setType: "standard" });
 
@@ -204,7 +217,7 @@ function renderStandard({ ex, lastAvg, root }) {
 
   startBtn.addEventListener("click", async () => {
     sessionId = await startSession(ex.id);
-    lockStepper(weightStepper);                 // weight is frozen for the rest of the exercise
+    if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
@@ -278,7 +291,8 @@ function renderStandard({ ex, lastAvg, root }) {
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(completed.el);
   root.appendChild(h("div", { style: "height:16px" }));
-  root.appendChild(weightFieldEl);
+  if (weightFieldEl) root.appendChild(weightFieldEl);
+  if (bodyweightBadge) root.appendChild(bodyweightBadge);
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(repsPanel.el);
   root.appendChild(h("div", { style: "height:24px" }));
@@ -298,12 +312,16 @@ function renderBilateral({ ex, lastAvg, root }) {
   const engine = makeIntervalEngine(phases);
 
   let sessionId = null;
-  const weight = { value: ex.workingWeight || 0 };
+  const weight = { value: ex.bodyweight ? 0 : (ex.workingWeight || 0) };
   const setIds = new Map();
 
   const indicator = makeSetIndicator("Round 1 of 3 · ready", lastAvg);
-  const weightStepper = stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
-  const weightFieldEl = field("Weight per side (kg)", weightStepper);
+  const weightStepper = ex.bodyweight ? null : stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
+  const weightFieldEl = ex.bodyweight ? null : field("Weight per side (kg)", weightStepper);
+  const bodyweightBadge = ex.bodyweight ? h("div", { class: "card card-tight body-s row", style: "justify-content:center; gap:8px" }, [
+    h("span", { class: "badge badge-brass" }, "Bodyweight"),
+    h("span", { style: "color: var(--ink-mute)" }, "no external load")
+  ]) : null;
   const completed = makeCompletedLog({ unitLabel: "Round" });
   const repsPanel = makeRepsPanel({ setType: "bilateral" });
 
@@ -317,7 +335,7 @@ function renderBilateral({ ex, lastAvg, root }) {
 
   startBtn.addEventListener("click", async () => {
     sessionId = await startSession(ex.id);
-    lockStepper(weightStepper);
+    if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
@@ -390,7 +408,8 @@ function renderBilateral({ ex, lastAvg, root }) {
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(completed.el);
   root.appendChild(h("div", { style: "height:16px" }));
-  root.appendChild(weightFieldEl);
+  if (weightFieldEl) root.appendChild(weightFieldEl);
+  if (bodyweightBadge) root.appendChild(bodyweightBadge);
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(repsPanel.el);
   root.appendChild(h("div", { style: "height:24px" }));
@@ -410,13 +429,17 @@ function renderContinuous({ ex, lastAvg, root }) {
   const engine = makeIntervalEngine(phases);
 
   let sessionId = null;
-  const weight = { value: ex.workingWeight || 0 };
+  const weight = { value: ex.bodyweight ? 0 : (ex.workingWeight || 0) };
   const tap = makeTapCounter();
   const tapWrap = h("div", { class: "hidden" }, [tap.el, h("p", { class: "tap-hint" }, "Tap to count · long-press to undo")]);
 
   const indicator = makeSetIndicator("10-minute block · ready", lastAvg);
-  const weightStepper = stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
-  const weightFieldEl = field("Weight (kg)", weightStepper);
+  const weightStepper = ex.bodyweight ? null : stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
+  const weightFieldEl = ex.bodyweight ? null : field("Weight (kg)", weightStepper);
+  const bodyweightBadge = ex.bodyweight ? h("div", { class: "card card-tight body-s row", style: "justify-content:center; gap:8px" }, [
+    h("span", { class: "badge badge-brass" }, "Bodyweight"),
+    h("span", { style: "color: var(--ink-mute)" }, "no external load")
+  ]) : null;
 
   const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "End early");
@@ -433,7 +456,7 @@ function renderContinuous({ ex, lastAvg, root }) {
 
   startBtn.addEventListener("click", async () => {
     sessionId = await startSession(ex.id);
-    lockStepper(weightStepper);
+    if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
@@ -454,7 +477,8 @@ function renderContinuous({ ex, lastAvg, root }) {
   root.appendChild(indicator.el);
   root.appendChild(ring.el);
   root.appendChild(h("div", { style: "height:16px" }));
-  root.appendChild(weightFieldEl);
+  if (weightFieldEl) root.appendChild(weightFieldEl);
+  if (bodyweightBadge) root.appendChild(bodyweightBadge);
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(tapWrap);
   root.appendChild(h("div", { style: "height:16px" }));

@@ -70,6 +70,7 @@ export async function addExercise(ex) {
     rounds: ex.rounds ?? null,           // standard: N; bilateral: 3 (fixed); continuous: null
     workingWeight: ex.workingWeight ?? 0,
     standardKey: ex.standardKey ?? null, // points into strength-standards
+    bodyweight: !!ex.bodyweight,         // true = no external weight, hide weight field in session
     createdAt: Date.now()
   }));
   await txDone(t);

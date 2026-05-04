@@ -9,6 +9,11 @@ import { SessionView } from "./views/session.js";
 import { ExerciseDetailView } from "./views/exercise-detail.js";
 import { HistoryView } from "./views/history.js";
 import { ProfileView } from "./views/profile.js";
+import { ManageExercisesView } from "./views/manage-exercises.js";
+
+// Bumped on every shipped change so the user can verify on the Profile screen
+// which build is actually running on their device.
+export const APP_VERSION = "v0.5";
 
 async function boot() {
   await seedIfEmpty(STARTER_EXERCISES);
@@ -19,6 +24,7 @@ async function boot() {
   registerRoute("/session/new/:exerciseId", SessionView);
   registerRoute("/history", HistoryView);
   registerRoute("/profile", ProfileView);
+  registerRoute("/manage-exercises", ManageExercisesView);
 
   mount(document.getElementById("view"));
   start();
