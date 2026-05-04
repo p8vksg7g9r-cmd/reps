@@ -168,6 +168,32 @@ export async function setsForSession(sessionId) {
   return reqAsPromise(t.objectStore("sets").index("by_sessionId").getAll(sessionId));
 }
 
+export async function setsForSessionExercise(sessionId, exerciseId) {
+  const all = await setsForSession(sessionId);
+  return all.filter((s) => s.exerciseId === exerciseId);
+}
+
+/**
+ * Remove every set in the given session that belongs to the given exercise.
+ * Used by History → per-exercise delete; the set rows are dropped, the
+ * session itself stays (it may still contain other exercises).
+ */
+export async function deleteExerciseFromSession(sessionId, exerciseId) {
+  const t = await tx(["sets"], "readwrite");
+  const idx = t.objectStore("sets").index("by_sessionId");
+  await new Promise((resolve, reject) => {
+    const cur = idx.openCursor(IDBKeyRange.only(sessionId));
+    cur.onsuccess = (e) => {
+      const c = e.target.result;
+      if (!c) return resolve();
+      if (c.value.exerciseId === exerciseId) c.delete();
+      c.continue();
+    };
+    cur.onerror = () => reject(cur.error);
+  });
+  await txDone(t);
+}
+
 export async function setsForExercise(exerciseId) {
   const t = await tx(["sets"]);
   const range = IDBKeyRange.bound([exerciseId, 0], [exerciseId, Number.MAX_SAFE_INTEGER]);

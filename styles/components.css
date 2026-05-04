@@ -256,6 +256,64 @@
 .mgr-row .sub { font-family: var(--font-mono); font-size: 11px; color: var(--ink-mute); }
 .mgr-row .actions { display: flex; gap: var(--s2); flex-wrap: wrap; align-items: center; }
 
+/* Compact icon button (used for inline edit/delete actions) */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+  color: var(--ink-soft);
+  background: rgba(15, 35, 64, 0.04);
+}
+.icon-btn:active { background: rgba(15, 35, 64, 0.10); }
+.icon-btn.danger { color: var(--terracotta); }
+.icon-btn.danger:active { background: rgba(217, 122, 79, 0.16); }
+.icon-btn svg { display: block; pointer-events: none; }
+
+/* History per-exercise block (so it can host its own action row) */
+.session-card .ex-block {
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--hairline);
+}
+.session-card .ex-block:first-of-type {
+  margin-top: var(--s3);
+}
+.session-card .ex-block .ex-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s2);
+}
+.session-card .ex-block .ex-head .name {
+  font-weight: 600; font-size: 14px;
+}
+.session-card .ex-block .ex-head .actions {
+  display: flex; align-items: center; gap: 6px;
+}
+.session-card .ex-block .ex-head .vol {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-mute);
+}
+
+/* Edit-exercise screen */
+.edit-set {
+  background: var(--paper);
+  border-radius: var(--r-md);
+  padding: var(--s4);
+  box-shadow: var(--shadow-1);
+}
+.edit-set .row-label {
+  font-family: var(--font-eyebrow);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  margin-bottom: var(--s3);
+}
+.edit-set .field + .field { margin-top: var(--s3); }
+
 /* App version footer */
 .version-footer {
   text-align: center;
