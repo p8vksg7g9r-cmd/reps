@@ -1,5 +1,5 @@
 /* REPS service worker — cache-first app shell. */
-const CACHE = "reps-v1";
+const CACHE = "reps-v3";
 const SHELL = [
   "./",
   "./index.html",

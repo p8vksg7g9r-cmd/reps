@@ -1,6 +1,6 @@
 import {
   getExercise, startSession, endSession,
-  recordSet, updateSet, setsForSession, updateExercise
+  recordSet, updateSet, setsForSession, lastSessionForExercise, updateExercise
 } from "../db/repo.js";
 import { h, eyebrow, stepper, field, modal } from "../ui/components.js";
 import {
@@ -10,14 +10,15 @@ import {
 import { makeTapCounter } from "../ui/tap-counter.js";
 
 /**
- * Routes:
- *   /session/new/:exerciseId
- *
- * Flow (standard / bilateral):
- *   work phase ends → stub set written with reps=null  → rest begins →
- *   reps prompt appears → user enters reps → stub updated → next work begins.
- * After the final work, any sets still missing reps trigger a single modal
- * to fill them in before the session is finalized.
+ * Session flow (standard / bilateral):
+ *   Pre-Start screen — exercise name, "Set N of N · ready", "Last time avg: X reps",
+ *                      weight stepper, Start button. NO reps input visible.
+ *   On Start        — startSession() runs; engine starts; timer ring becomes active.
+ *   Work phase      — set indicator updates to "Set N of N · working".
+ *   Work ends       — stub set written (reps=null) for durability.
+ *   Rest phase      — reps prompt slides in; user enters reps for the set just done.
+ *   Final set ends  — any rounds still missing reps are gathered into one modal
+ *                     before the session is finalized.
  */
 export async function SessionView(params, root) {
   const exerciseId = Number(params.exerciseId);
@@ -27,7 +28,9 @@ export async function SessionView(params, root) {
     return;
   }
 
-  const sessionId = await startSession(exerciseId);
+  // Compute the previous session's average reps BEFORE creating a new session,
+  // so the lookup never returns the in-progress one.
+  const lastAvg = await computeLastAvg(exerciseId);
 
   const head = h("div", { class: "page-head" }, [
     eyebrow(ex.setType === "standard" ? `Standard · ${ex.rounds} rounds`
@@ -37,73 +40,92 @@ export async function SessionView(params, root) {
   ]);
   root.appendChild(head);
 
-  if (ex.setType === "standard") return renderStandard({ ex, sessionId, root });
-  if (ex.setType === "bilateral") return renderBilateral({ ex, sessionId, root });
-  if (ex.setType === "continuous") return renderContinuous({ ex, sessionId, root });
+  if (ex.setType === "standard") return renderStandard({ ex, lastAvg, root });
+  if (ex.setType === "bilateral") return renderBilateral({ ex, lastAvg, root });
+  if (ex.setType === "continuous") return renderContinuous({ ex, lastAvg, root });
 }
 
-/* ----------------------------------------------------- shared helpers */
+/* ----------------------------------------------------- helpers */
 
-/** A persistent reps prompt panel that swaps between "enter" and "saved" states. */
-function makeRepsPanel({ defaultReps = 8, setType }) {
-  const root = h("div", { class: "stack" });
-  let currentRound = null;
-  let currentSetId = null;
-  let onSave = null;
+/** Average reps across the most recent prior session for an exercise. Null if none. */
+async function computeLastAvg(exerciseId) {
+  const last = await lastSessionForExercise(exerciseId);
+  if (!last) return null;
+  const sets = await setsForSession(last.id);
+  const valid = sets.filter((s) => s.reps != null && s.reps > 0).map((s) => s.reps);
+  if (valid.length === 0) return null;
+  return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
+}
+
+/** Set-indicator card with eyebrow status + last-time reference. Mutable in place. */
+function makeSetIndicator(initialEyebrow, lastAvg) {
+  const eb = eyebrow(initialEyebrow);
+  const sub = lastAvg != null
+    ? h("div", { class: "mono", style: "font-size:13px; color: var(--ink-mute); margin-top:4px" },
+        `Last time avg: ${lastAvg} reps`)
+    : null;
+  const card = h("div", { class: "card stack-sm" }, [eb, sub].filter(Boolean));
+  return {
+    el: card,
+    set(text) { eb.textContent = text; }
+  };
+}
+
+/** Reps prompt panel — hidden until showPrompt() is called, then either prompt or saved-state. */
+function makeRepsPanel({ setType }) {
+  const root = h("div", { class: "hidden" });
 
   function clear() {
+    root.classList.add("hidden");
     root.innerHTML = "";
-    currentRound = null;
-    currentSetId = null;
-    onSave = null;
   }
 
-  function showPrompt({ round, setId, hint, onSave: cb }) {
-    currentRound = round;
-    currentSetId = setId;
-    onSave = cb;
+  function showPrompt({ round, hint, defaultReps, onSave }) {
+    root.classList.remove("hidden");
     root.innerHTML = "";
     let value = defaultReps;
     const stp = stepper({ value, step: 1, onChange: (n) => { value = n; } });
-    const label = setType === "bilateral" ? `Round ${round} — reps per side` : `Round ${round} — reps`;
+    const label = setType === "bilateral" ? `Round ${round} — reps per side` : `Set ${round} — reps`;
     root.appendChild(h("div", { class: "card stack-sm" }, [
-      eyebrow(hint || "How many reps did you complete?"),
+      eyebrow(hint),
       field(label, stp),
       h("button", { class: "btn btn-primary btn-block", onclick: async () => {
-        await cb(value);
+        await onSave(value);
         showSaved({ round, reps: value });
-      } }, `Save round ${round}`)
+      } }, `Save set ${round}`)
     ]));
   }
 
   function showSaved({ round, reps }) {
+    root.classList.remove("hidden");
     root.innerHTML = "";
     root.appendChild(h("div", { class: "card card-tight body-s row-between" }, [
-      h("span", {}, `Round ${round} saved`),
+      h("span", {}, `Set ${round} saved`),
       h("span", { class: "mono" }, `${reps} reps`)
     ]));
   }
 
-  function showIdle(text) {
+  function showText(text) {
+    root.classList.remove("hidden");
     root.innerHTML = "";
     root.appendChild(h("div", { class: "card card-tight body-s", style: "color: var(--ink-mute); text-align:center" }, text));
   }
 
-  return { el: root, clear, showPrompt, showSaved, showIdle, get currentRound() { return currentRound; }, get currentSetId() { return currentSetId; } };
+  return { el: root, clear, showPrompt, showSaved, showText };
 }
 
-/** Modal that prompts for reps for any rounds still missing them. */
-function promptMissingReps(missing, { setType }) {
+function promptMissingReps(missing, { setType, lastAvg }) {
+  const fallback = lastAvg ?? 8;
   return new Promise((resolve) => {
-    const refs = missing.map((s) => ({ setId: s.id, round: s.round, value: 8 }));
+    const refs = missing.map((s) => ({ setId: s.id, round: s.round, value: fallback }));
     const fields = refs.map((r) => {
       const stp = stepper({ value: r.value, step: 1, onChange: (n) => { r.value = n; } });
-      const lbl = setType === "bilateral" ? `Round ${r.round} reps per side` : `Round ${r.round} reps`;
+      const lbl = setType === "bilateral" ? `Round ${r.round} reps per side` : `Set ${r.round} reps`;
       return field(lbl, stp);
     });
     const m = modal([
       eyebrow("Before we save"),
-      h("h2", { class: "display-m" }, missing.length === 1 ? "1 round needs reps" : `${missing.length} rounds need reps`),
+      h("h2", { class: "display-m" }, missing.length === 1 ? "1 set needs reps" : `${missing.length} sets need reps`),
       h("p", { class: "body-s", style: "color: var(--ink-mute)" }, "Fill these in and we'll wrap up the session."),
       ...fields,
       h("button", { class: "btn btn-primary btn-block btn-lg", onclick: async () => {
@@ -117,17 +139,19 @@ function promptMissingReps(missing, { setType }) {
 
 /* ----------------------------------------------------- standard */
 
-function renderStandard({ ex, sessionId, root }) {
+function renderStandard({ ex, lastAvg, root }) {
   const phases = standardPhases(ex.rounds);
   const ring = renderTimerRing(60);
+  ring.setPhase("READY", 60);
   const engine = makeIntervalEngine(phases);
 
+  let sessionId = null;
   const weight = { value: ex.workingWeight || 0 };
-  const setIds = new Map(); // round → setId
+  const setIds = new Map();
 
+  const indicator = makeSetIndicator(`Set 1 of ${ex.rounds} · ready`, lastAvg);
   const weightInput = stepper({ value: weight.value, step: 1, onChange: (n) => weight.value = n });
-  const repsPanel = makeRepsPanel({ defaultReps: 8, setType: "standard" });
-  repsPanel.showIdle("Reps prompt appears between sets.");
+  const repsPanel = makeRepsPanel({ setType: "standard" });
 
   const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "Skip phase");
@@ -137,7 +161,8 @@ function renderStandard({ ex, sessionId, root }) {
     location.hash = `#/exercise/${ex.id}`;
   } }, "Finish & save");
 
-  startBtn.addEventListener("click", () => {
+  startBtn.addEventListener("click", async () => {
+    sessionId = await startSession(ex.id);
     unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
@@ -149,13 +174,11 @@ function renderStandard({ ex, sessionId, root }) {
 
   engine.onPhase(async ({ phase, index }) => {
     ring.setPhase(phase.label, phase.seconds);
-
     const prev = lastPhaseIdx;
     lastPhaseIdx = index;
     const prevPhase = phases[prev];
 
     if (prev >= 0 && prevPhase?.kind === "work") {
-      // Just finished a work phase — write a stub for that round.
       const round = prevPhase.round;
       const setId = await recordSet({
         sessionId,
@@ -167,26 +190,24 @@ function renderStandard({ ex, sessionId, root }) {
       });
       setIds.set(round, setId);
 
-      // If we're now in rest, surface the reps prompt for the round we just finished.
       if (phase.kind === "rest") {
+        indicator.set(`Set ${round} done · Set ${round + 1} of ${ex.rounds} next`);
         repsPanel.showPrompt({
           round,
-          setId,
-          hint: `Round ${round} done — log the reps`,
+          hint: `Set ${round} done — log the reps`,
+          defaultReps: lastAvg ?? 8,
           onSave: async (reps) => updateSet(setId, { reps })
         });
       }
     } else if (phase.kind === "work") {
-      // Starting a new work phase. If a previous prompt is still open and the user
-      // didn't save it, we leave its data as null — the missing-reps modal will catch it.
-      repsPanel.showIdle(`Round ${phase.round} in progress…`);
+      indicator.set(`Set ${phase.round} of ${ex.rounds} · working`);
+      repsPanel.clear();
     }
   });
 
   engine.onTick(({ remaining }) => ring.setRemaining(remaining));
 
   engine.onDone(async () => {
-    // Final work phase has no following phase, so write its stub here.
     const last = phases[phases.length - 1];
     if (last?.kind === "work") {
       const round = last.round;
@@ -202,16 +223,18 @@ function renderStandard({ ex, sessionId, root }) {
     }
     skipBtn.classList.add("hidden");
     ring.setPhase("DONE", 0);
+    indicator.set("Workout complete");
 
     const all = await setsForSession(sessionId);
     const missing = all.filter((s) => s.reps == null).sort((a, b) => a.round - b.round);
     if (missing.length > 0) {
-      await promptMissingReps(missing, { setType: "standard" });
+      await promptMissingReps(missing, { setType: "standard", lastAvg });
     }
-    repsPanel.showIdle("All sets logged. Finish to save.");
+    repsPanel.showText("All sets logged. Finish to save.");
     finishBtn.classList.remove("hidden");
   });
 
+  root.appendChild(indicator.el);
   root.appendChild(ring.el);
   root.appendChild(h("div", { style: "height:24px" }));
   root.appendChild(field("Weight (kg)", weightInput));
@@ -227,17 +250,19 @@ function renderStandard({ ex, sessionId, root }) {
 
 /* ----------------------------------------------------- bilateral */
 
-function renderBilateral({ ex, sessionId, root }) {
+function renderBilateral({ ex, lastAvg, root }) {
   const phases = bilateralPhases(3);
   const ring = renderTimerRing(60);
+  ring.setPhase("READY", 60);
   const engine = makeIntervalEngine(phases);
 
+  let sessionId = null;
   const weight = { value: ex.workingWeight || 0 };
   const setIds = new Map();
 
+  const indicator = makeSetIndicator("Round 1 of 3 · ready", lastAvg);
   const weightInput = stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
-  const repsPanel = makeRepsPanel({ defaultReps: 8, setType: "bilateral" });
-  repsPanel.showIdle("Reps prompt appears after each round.");
+  const repsPanel = makeRepsPanel({ setType: "bilateral" });
 
   const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "Skip phase");
@@ -247,7 +272,8 @@ function renderBilateral({ ex, sessionId, root }) {
     location.hash = `#/exercise/${ex.id}`;
   } }, "Finish & save");
 
-  startBtn.addEventListener("click", () => {
+  startBtn.addEventListener("click", async () => {
+    sessionId = await startSession(ex.id);
     unlockAudio();
     engine.start();
     startBtn.classList.add("hidden");
@@ -259,13 +285,10 @@ function renderBilateral({ ex, sessionId, root }) {
 
   engine.onPhase(async ({ phase, index }) => {
     ring.setPhase(phase.label, phase.seconds);
-
     const prev = lastPhaseIdx;
     lastPhaseIdx = index;
     const prevPhase = phases[prev];
 
-    // A bilateral round is "complete" when the R-side work phase ends. Write the
-    // stub then — one set per round, mirroring the standard handler.
     if (prev >= 0 && prevPhase?.kind === "work" && prevPhase?.side === "R") {
       const round = prevPhase.round;
       const setId = await recordSet({
@@ -278,15 +301,18 @@ function renderBilateral({ ex, sessionId, root }) {
       });
       setIds.set(round, setId);
       if (phase.kind === "rest") {
+        indicator.set(`Round ${round} done · Round ${round + 1} of 3 next`);
         repsPanel.showPrompt({
           round,
-          setId,
           hint: `Round ${round} done — log reps per side`,
+          defaultReps: lastAvg ?? 8,
           onSave: async (reps) => updateSet(setId, { reps })
         });
       }
-    } else if (phase.kind === "work" && phase.side === "L") {
-      repsPanel.showIdle(`Round ${phase.round} in progress…`);
+    } else if (phase.kind === "work") {
+      const sideText = phase.side === "L" ? "left" : "right";
+      indicator.set(`Round ${phase.round} of 3 · ${sideText}`);
+      if (phase.side === "L") repsPanel.clear();
     }
   });
 
@@ -308,16 +334,18 @@ function renderBilateral({ ex, sessionId, root }) {
     }
     skipBtn.classList.add("hidden");
     ring.setPhase("DONE", 0);
+    indicator.set("Workout complete");
 
     const all = await setsForSession(sessionId);
     const missing = all.filter((s) => s.reps == null).sort((a, b) => a.round - b.round);
     if (missing.length > 0) {
-      await promptMissingReps(missing, { setType: "bilateral" });
+      await promptMissingReps(missing, { setType: "bilateral", lastAvg });
     }
-    repsPanel.showIdle("All rounds logged. Finish to save.");
+    repsPanel.showText("All rounds logged. Finish to save.");
     finishBtn.classList.remove("hidden");
   });
 
+  root.appendChild(indicator.el);
   root.appendChild(ring.el);
   root.appendChild(h("div", { style: "height:24px" }));
   root.appendChild(field("Weight per side (kg)", weightInput));
@@ -332,28 +360,28 @@ function renderBilateral({ ex, sessionId, root }) {
 }
 
 /* ----------------------------------------------------- continuous */
-// Continuous is a single 10-min block with live tap counting — there is no
-// rest period to insert a rep prompt into, so the original flow is preserved:
-// the user taps reps live, then hits Finish to save the single set.
+// Continuous has no rest period to insert a per-set prompt into. The tap counter
+// IS the rep recorder, so it stays — but it's hidden until Start is pressed,
+// keeping the pre-set screen free of any rep UI.
 
-function renderContinuous({ ex, sessionId, root }) {
+function renderContinuous({ ex, lastAvg, root }) {
   const phases = continuousPhases();
   const ring = renderTimerRing(600);
+  ring.setPhase("READY", 600);
   const engine = makeIntervalEngine(phases);
 
+  let sessionId = null;
   const weight = { value: ex.workingWeight || 0 };
   const tap = makeTapCounter();
+  const tapWrap = h("div", { class: "hidden" }, [tap.el, h("p", { class: "tap-hint" }, "Tap to count · long-press to undo")]);
 
+  const indicator = makeSetIndicator("10-minute block · ready", lastAvg);
   const weightInput = stepper({ value: weight.value, step: 0.5, onChange: (n) => weight.value = n });
 
-  const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg", onclick: () => {
-    unlockAudio();
-    engine.start();
-    startBtn.classList.add("hidden");
-    skipBtn.classList.remove("hidden");
-  } }, "Start");
+  const startBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Start");
   const skipBtn = h("button", { class: "btn btn-ghost btn-block hidden", onclick: () => engine.skip() }, "End early");
   const finishBtn = h("button", { class: "btn btn-primary btn-block btn-lg hidden", onclick: async () => {
+    if (!sessionId) return;
     await recordSet({
       sessionId,
       exerciseId: ex.id,
@@ -367,20 +395,31 @@ function renderContinuous({ ex, sessionId, root }) {
     location.hash = `#/exercise/${ex.id}`;
   } }, "Finish & save");
 
+  startBtn.addEventListener("click", async () => {
+    sessionId = await startSession(ex.id);
+    unlockAudio();
+    engine.start();
+    startBtn.classList.add("hidden");
+    skipBtn.classList.remove("hidden");
+    tapWrap.classList.remove("hidden");
+    indicator.set("10-minute block · working");
+  });
+
   engine.onPhase(({ phase }) => ring.setPhase(phase.label, phase.seconds));
   engine.onTick(({ remaining }) => ring.setRemaining(remaining));
   engine.onDone(() => {
     skipBtn.classList.add("hidden");
     finishBtn.classList.remove("hidden");
     ring.setPhase("DONE", 0);
+    indicator.set("Block complete");
   });
 
+  root.appendChild(indicator.el);
   root.appendChild(ring.el);
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(field("Weight (kg)", weightInput));
   root.appendChild(h("div", { style: "height:16px" }));
-  root.appendChild(tap.el);
-  root.appendChild(h("p", { class: "tap-hint" }, "Tap to count · long-press to undo"));
+  root.appendChild(tapWrap);
   root.appendChild(h("div", { style: "height:16px" }));
   root.appendChild(startBtn);
   root.appendChild(skipBtn);
