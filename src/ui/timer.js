@@ -1,17 +1,21 @@
-// Auto-advancing interval engine with WebAudio cues.
-// Tap-anywhere on the timer face skips to the next phase.
+// Worker-backed interval engine + WebAudio cues.
 //
-// Phase model:
-//   { kind: "ready" | "work" | "rest", label, seconds, round?, side? }
-// Every phase list begins with a 15-second READY phase so the user can get
-// into position before the first work interval starts.
+// Timer authority lives in src/ui/timer-worker.js, which uses Date.now()
+// to stay accurate across foreground/background transitions. This module
+// is a thin main-thread wrapper that reacts to the worker's messages,
+// plays beeps via a single shared AudioContext, and exposes the same
+// engine API the session view consumes.
 //
 // Audio cues:
-//   READY phase starts → soft single beep
-//   WORK phase starts  → two short beeps  (high pitch)
-//   REST phase starts  → single short beep (mid pitch)
-//   Final phase ends   → three ascending tones (exercise complete)
+//   READY phase starts → soft single beep (520 Hz)
+//   WORK phase starts  → two short beeps  (880 Hz × 2)
+//   REST phase starts  → single short beep (660 Hz)
+//   Final phase ends   → three ascending tones (660 / 880 / 1100 Hz)
 //   Last 3 seconds of any phase → quiet tick beep
+//
+// All beeps are scheduled with AudioContext.currentTime + an offset, so the
+// sub-tones inside workStartBeep / exerciseEndBeep fire at deterministic
+// times regardless of main-thread responsiveness.
 
 let audioCtx = null;
 
@@ -24,9 +28,8 @@ function ensureCtx() {
 
 /** Resume the AudioContext in response to a user gesture. iOS requires this
  *  before any sound will play. Returns a promise that resolves once the
- *  context is running, so callers can await it before scheduling beeps.
- *  Plays a near-silent primer oscillator that helps unblock some older
- *  WebKit versions. Safe to call repeatedly — only ever resumes if needed. */
+ *  context is running, so callers can await before scheduling beeps.
+ *  Plays a near-silent primer oscillator that helps unblock older WebKit. */
 export function unlockAudio() {
   const c = ensureCtx();
   if (!c) return Promise.resolve();
@@ -40,13 +43,29 @@ export function unlockAudio() {
     osc.start(t);
     osc.stop(t + 0.02);
   } catch {}
-  if (c.state === "suspended") return c.resume().catch(() => {});
+  if (c.state === "suspended" || c.state === "interrupted") {
+    return c.resume().catch(() => {});
+  }
   return Promise.resolve();
 }
 
+// Re-resume the AudioContext as soon as the page comes back to the foreground.
+// iOS suspends the context (or marks it 'interrupted') when the page is hidden,
+// and beeps scheduled before resume completes are silently dropped.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && audioCtx) {
+    if (audioCtx.state === "suspended" || audioCtx.state === "interrupted") {
+      audioCtx.resume().catch(() => {});
+    }
+  }
+});
+
 function beep({ freq = 880, duration = 0.08, volume = 0.18, when = 0 } = {}) {
   const c = audioCtx;
-  if (!c || c.state !== "running") return;
+  if (!c) return;
+  // Best-effort wake the context if a beep arrives mid-suspension.
+  if (c.state !== "running") c.resume().catch(() => {});
+  if (c.state !== "running") return;
   const osc = c.createOscillator();
   const gain = c.createGain();
   osc.frequency.value = freq;
@@ -60,98 +79,68 @@ function beep({ freq = 880, duration = 0.08, volume = 0.18, when = 0 } = {}) {
   osc.stop(t + duration);
 }
 
-export function tickBeep()         { beep({ freq: 660, duration: 0.05, volume: 0.10 }); }
-export function readyStartBeep()   { beep({ freq: 520, duration: 0.10, volume: 0.16 }); }
+export function tickBeep()       { beep({ freq: 660, duration: 0.05, volume: 0.10 }); }
+export function readyStartBeep() { beep({ freq: 520, duration: 0.10, volume: 0.16 }); }
 export function workStartBeep() {
   beep({ freq: 880, duration: 0.12, volume: 0.22, when: 0.00 });
   beep({ freq: 880, duration: 0.12, volume: 0.22, when: 0.16 });
 }
-export function restStartBeep()    { beep({ freq: 660, duration: 0.16, volume: 0.20 }); }
+export function restStartBeep()  { beep({ freq: 660, duration: 0.16, volume: 0.20 }); }
 export function exerciseEndBeep() {
   beep({ freq: 660,  duration: 0.16, volume: 0.22, when: 0.00 });
   beep({ freq: 880,  duration: 0.16, volume: 0.22, when: 0.18 });
   beep({ freq: 1100, duration: 0.32, volume: 0.24, when: 0.36 });
 }
 
-// Backward-compat aliases (kept in case anything else imports them).
+// Backward-compat aliases.
 export function chimeBeep() { workStartBeep(); }
 export function endChime()  { exerciseEndBeep(); }
 
+function transitionBeep(phase) {
+  if (!phase) return;
+  if (phase.kind === "work")       workStartBeep();
+  else if (phase.kind === "rest")  restStartBeep();
+  else if (phase.kind === "ready") readyStartBeep();
+}
+
 /**
- * Build an interval engine.
- * phases: ordered list of { kind, label, seconds, ... }.
+ * Build an interval engine backed by a Web Worker.
+ * Returns { start, skip, stop, onTick(cb), onPhase(cb), onDone(cb) }.
  *
- * Returns { start, pause, resume, skip, stop, onTick(cb), onPhase(cb), onDone(cb) }
+ * Tick callback signature: { remaining, phase, index }
+ * Phase callback signature: { remaining, phase, index }
  */
 export function makeIntervalEngine(phases) {
-  let idx = 0;
-  let remaining = phases[0]?.seconds ?? 0;
-  let timer = null;
-  let running = false;
+  const worker = new Worker(new URL("./timer-worker.js", import.meta.url));
+  worker.postMessage({ type: "init", phases });
 
   const tickListeners = [];
   const phaseListeners = [];
   const doneListeners = [];
 
-  function emit(arr, ...args) { for (const fn of arr) fn(...args); }
+  function emit(arr, ...args) { for (const fn of arr) try { fn(...args); } catch {} }
 
-  function transitionBeep(phase) {
-    if (!phase) return;
-    if (phase.kind === "work")  workStartBeep();
-    else if (phase.kind === "rest")  restStartBeep();
-    else if (phase.kind === "ready") readyStartBeep();
-  }
-
-  function tick() {
-    if (!running) return;
-    remaining--;
-    emit(tickListeners, { remaining, phase: phases[idx], index: idx });
-    if (remaining === 3 || remaining === 2 || remaining === 1) tickBeep();
-    if (remaining <= 0) advance();
-  }
-
-  function advance() {
-    idx++;
-    if (idx >= phases.length) {
-      running = false;
-      clearInterval(timer);
-      timer = null;
+  worker.onmessage = (e) => {
+    const m = e.data || {};
+    if (m.type === "tick") {
+      if (m.remaining === 3 || m.remaining === 2 || m.remaining === 1) tickBeep();
+      emit(tickListeners, { remaining: m.remaining, phase: phases[m.phaseIdx], index: m.phaseIdx });
+    } else if (m.type === "phase") {
+      transitionBeep(phases[m.phaseIdx]);
+      emit(phaseListeners, { phase: phases[m.phaseIdx], index: m.phaseIdx, remaining: m.remaining });
+    } else if (m.type === "done") {
       exerciseEndBeep();
       emit(doneListeners);
-      return;
     }
-    remaining = phases[idx].seconds;
-    transitionBeep(phases[idx]);
-    emit(phaseListeners, { phase: phases[idx], index: idx, remaining });
-  }
+  };
 
   return {
-    start() {
-      if (running) return;
-      running = true;
-      transitionBeep(phases[idx]);
-      emit(phaseListeners, { phase: phases[idx], index: idx, remaining });
-      timer = setInterval(tick, 1000);
-    },
-    pause() {
-      running = false;
-      if (timer) { clearInterval(timer); timer = null; }
-    },
-    resume() {
-      if (running || idx >= phases.length) return;
-      running = true;
-      timer = setInterval(tick, 1000);
-    },
-    skip() { if (idx < phases.length) advance(); },
-    stop() {
-      running = false;
-      if (timer) { clearInterval(timer); timer = null; }
-      idx = phases.length;
-    },
-    onTick(cb) { tickListeners.push(cb); },
+    start() { worker.postMessage({ type: "start" }); },
+    skip()  { worker.postMessage({ type: "skip" }); },
+    stop()  { worker.postMessage({ type: "stop" }); worker.terminate(); },
+    onTick(cb)  { tickListeners.push(cb); },
     onPhase(cb) { phaseListeners.push(cb); },
-    onDone(cb) { doneListeners.push(cb); },
-    state() { return { idx, remaining, phase: phases[idx], running, total: phases.length }; }
+    onDone(cb)  { doneListeners.push(cb); }
   };
 }
 

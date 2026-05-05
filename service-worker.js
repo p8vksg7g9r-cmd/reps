@@ -1,5 +1,10 @@
-/* REPS service worker — cache-first app shell. */
-const CACHE = "reps-v10";
+/* REPS service worker — cache-first app shell.
+ *
+ * IMPORTANT: this SW only manages the Cache API. It must NEVER touch
+ * IndexedDB or other storage. User data — exercises, sessions, sets,
+ * profile, weight log — lives in IndexedDB and survives every shell
+ * update, cache bust, and SW reinstall. */
+const CACHE = "reps-v11";
 const SHELL = [
   "./",
   "./index.html",
@@ -18,6 +23,8 @@ const SHELL = [
   "./src/domain/rest-rule.js",
   "./src/domain/week.js",
   "./src/ui/timer.js",
+  "./src/ui/timer-worker.js",
+  "./src/ui/wake-lock.js",
   "./src/ui/tap-counter.js",
   "./src/ui/components.js",
   "./src/views/home.js",

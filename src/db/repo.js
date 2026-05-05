@@ -267,6 +267,12 @@ export async function importAll(data, { wipe = true } = {}) {
 
 /* -------------------- seeding -------------------- */
 
+/**
+ * One-shot seed: only inserts the starter exercises when the store is empty.
+ * NEVER overwrites or modifies user-added/edited exercises on later boots,
+ * even if the starter list itself changes — adding new starters in the
+ * source after first install requires the user to add them manually.
+ */
 export async function seedIfEmpty(starter) {
   const existing = await listExercises();
   if (existing.length > 0) return;

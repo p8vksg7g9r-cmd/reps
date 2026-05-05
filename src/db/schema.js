@@ -1,10 +1,24 @@
 // IndexedDB open + migrations.
+//
 // Stores:
 //   profile     — keyPath "id" (always "me")
 //   weightLog   — keyPath "id" autoIncrement, indexed by "loggedAt"
 //   exercises   — keyPath "id" autoIncrement, indexed by "name"
 //   sessions    — keyPath "id" autoIncrement, indexed by "startedAt"
 //   sets        — keyPath "id" autoIncrement, indexed by "sessionId" and ["exerciseId","completedAt"]
+//
+// PERSISTENCE CONTRACT (do not break):
+//   * IndexedDB is preserved across app updates and service-worker reloads.
+//     Only Cache API entries are cleared on SW activate (see service-worker.js).
+//   * DB_VERSION must only ever increase when the schema (stores or indexes)
+//     changes. Adding new columns to existing rows does NOT require a bump
+//     because IndexedDB is schemaless on the row level.
+//   * Migrations live inside onupgradeneeded under guarded `if (oldV < N)`
+//     blocks so they only run once per upgrade boundary and never wipe
+//     existing data. Never call store.clear() from a migration.
+//   * The starter exercise list is only seeded if the exercises store is
+//     empty (see seedIfEmpty in repo.js). User-added or user-modified
+//     exercises must never be overwritten by an update.
 
 const DB_NAME = "reps";
 const DB_VERSION = 1;

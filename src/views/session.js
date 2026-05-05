@@ -7,6 +7,42 @@ import {
   makeIntervalEngine, standardPhases, bilateralPhases, continuousPhases, ninetyBilateralPhases,
   renderTimerRing, unlockAudio
 } from "../ui/timer.js";
+import { makeTapCounter } from "../ui/tap-counter.js";
+import { acquireWakeLock, releaseWakeLock } from "../ui/wake-lock.js";
+
+/** Format a positive integer of seconds as M:SS. */
+function fmtMinSec(totalSec) {
+  if (totalSec == null || totalSec < 0) totalSec = 0;
+  const m = Math.floor(totalSec / 60);
+  const ss = String(totalSec % 60).padStart(2, "0");
+  return `${m}:${ss}`;
+}
+
+/**
+ * Total time remaining for the exercise = remaining of the current phase plus
+ * the full duration of every subsequent phase. Recomputes naturally when the
+ * user skips because we always feed the current phase index + remaining.
+ */
+function totalRemainingSec(phases, currentPhaseIdx, currentPhaseRemaining) {
+  let total = Math.max(0, currentPhaseRemaining || 0);
+  for (let i = (currentPhaseIdx ?? 0) + 1; i < phases.length; i++) {
+    total += phases[i].seconds;
+  }
+  return total;
+}
+
+/** Prominent "Exercise time remaining" widget shown below the timer ring. */
+function makeTotalRemaining(initialSec) {
+  const value = h("div", { class: "tr-value mono" }, fmtMinSec(initialSec));
+  const root = h("div", { class: "total-remaining" }, [
+    h("div", { class: "tr-label" }, "Exercise time remaining"),
+    value
+  ]);
+  return {
+    el: root,
+    set(sec) { value.textContent = fmtMinSec(sec); }
+  };
+}
 
 /** Pick the timing phases for an exercise based on its set type. */
 function phasesFor(ex) {
@@ -19,7 +55,6 @@ function phasesFor(ex) {
     default:                 return standardPhases(ex.rounds || 3);
   }
 }
-import { makeTapCounter } from "../ui/tap-counter.js";
 
 export async function SessionView(params, root) {
   const exerciseId = Number(params.exerciseId);
@@ -94,7 +129,10 @@ function makeCompletedLog({ unitLabel = "Set" } = {}) {
   return { el: card, upsert };
 }
 
-/** Reps prompt panel. Starts BLANK each time it's shown — no pre-fill. */
+/** Reps prompt panel. Starts BLANK each time it's shown — no pre-fill.
+ *  After save, the panel just collapses silently — the saved set is already
+ *  visible in the completed-sets log above, so a 'Set N saved' card here
+ *  would be redundant. */
 function makeRepsPanel({ setType }) {
   const root = h("div", { class: "hidden" });
 
@@ -121,21 +159,12 @@ function makeRepsPanel({ setType }) {
         return;
       }
       await onSave(value);
-      showSaved({ round, reps: value });
+      clear();
     };
     root.appendChild(h("div", { class: "card stack-sm" }, [
       eyebrow(hint),
       field(label, stp),
       saveBtn
-    ]));
-  }
-
-  function showSaved({ round, reps }) {
-    root.classList.remove("hidden");
-    root.innerHTML = "";
-    root.appendChild(h("div", { class: "card card-tight body-s row-between" }, [
-      h("span", {}, `${setType === "bilateral" ? "Round" : "Set"} ${round} saved`),
-      h("span", { class: "mono" }, `${reps} reps`)
     ]));
   }
 
@@ -145,7 +174,7 @@ function makeRepsPanel({ setType }) {
     root.appendChild(h("div", { class: "card card-tight body-s", style: "color: var(--ink-mute); text-align:center" }, text));
   }
 
-  return { el: root, clear, showPrompt, showSaved, showText };
+  return { el: root, clear, showPrompt, showText };
 }
 
 /** Modal for any sets that didn't get reps entered during their rest period. Blank entries. */
@@ -239,12 +268,14 @@ function makeEndOfExerciseButtons({ getSessionId, onPersist }) {
   const endSess = h("button", { class: "btn btn-ghost btn-block btn-lg" }, "End session");
   startNew.addEventListener("click", async () => {
     await onPersist?.();
+    releaseWakeLock();
     location.hash = "#/exercises";
   });
   endSess.addEventListener("click", async () => {
     await onPersist?.();
     const sid = getSessionId();
     if (sid != null) await endSession(sid);
+    releaseWakeLock();
     location.hash = `#/summary/${sid}`;
   });
   wrap.appendChild(startNew);
@@ -263,11 +294,10 @@ function renderStandard({ ex, lastAvg, root }) {
   const totalSets = phases.filter((p) => p.kind === "work").length;
   const firstSec = phases[0]?.seconds || 60;
   const ring = renderTimerRing(firstSec);
-  // Pre-Start ring shows "READY" + the duration of the first phase (the 15s
-  // get-ready). Once Start fires, the engine emits a phase change which
-  // updates the label to "GET READY" and starts ticking.
   ring.setPhase("READY", firstSec);
   const engine = makeIntervalEngine(phases);
+  const totalInitial = phases.reduce((sum, p) => sum + p.seconds, 0);
+  const totalRemaining = makeTotalRemaining(totalInitial);
 
   let sessionId = null;
   const weight = { value: ex.bodyweight ? 0 : null };  // blank — user enters from scratch
@@ -313,6 +343,7 @@ function renderStandard({ ex, lastAvg, root }) {
     sessionId = open.id;
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     await unlockAudio();
+    acquireWakeLock().catch(() => {});
     engine.start();
     startBtn.classList.add("hidden");
     skipBtn.classList.remove("hidden");
@@ -321,8 +352,9 @@ function renderStandard({ ex, lastAvg, root }) {
 
   let lastPhaseIdx = -1;
 
-  engine.onPhase(async ({ phase, index }) => {
+  engine.onPhase(async ({ phase, index, remaining }) => {
     ring.setPhase(phase.label, phase.seconds);
+    totalRemaining.set(totalRemainingSec(phases, index, remaining));
     const prev = lastPhaseIdx;
     lastPhaseIdx = index;
     const prevPhase = phases[prev];
@@ -352,7 +384,10 @@ function renderStandard({ ex, lastAvg, root }) {
     }
   });
 
-  engine.onTick(({ remaining }) => ring.setRemaining(remaining));
+  engine.onTick(({ remaining, index }) => {
+    ring.setRemaining(remaining);
+    totalRemaining.set(totalRemainingSec(phases, index, remaining));
+  });
 
   engine.onDone(async () => {
     const last = phases[phases.length - 1];
@@ -366,6 +401,7 @@ function renderStandard({ ex, lastAvg, root }) {
     }
     skipBtn.classList.add("hidden");
     ring.setPhase("DONE", 0);
+    totalRemaining.set(0);
     indicator.set("Exercise complete");
 
     // Filter to this exercise's sets only — sessions are now multi-exercise.
@@ -382,7 +418,8 @@ function renderStandard({ ex, lastAvg, root }) {
 
   root.appendChild(indicator.el);
   root.appendChild(ring.el);
-  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(totalRemaining.el);
+  root.appendChild(h("div", { style: "height:8px" }));
   root.appendChild(completed.el);
   root.appendChild(h("div", { style: "height:16px" }));
   if (weightFieldEl) root.appendChild(weightFieldEl);
@@ -395,7 +432,7 @@ function renderStandard({ ex, lastAvg, root }) {
   root.appendChild(skipBtn);
   root.appendChild(endButtons.el);
 
-  return () => engine.stop();
+  return () => { engine.stop(); releaseWakeLock(); };
 }
 
 /* ----------------------------------------------------- bilateral */
@@ -406,6 +443,8 @@ function renderBilateral({ ex, lastAvg, root }) {
   const ring = renderTimerRing(firstSec);
   ring.setPhase("READY", firstSec);
   const engine = makeIntervalEngine(phases);
+  const totalInitial = phases.reduce((sum, p) => sum + p.seconds, 0);
+  const totalRemaining = makeTotalRemaining(totalInitial);
 
   let sessionId = null;
   const weight = { value: ex.bodyweight ? 0 : null };
@@ -449,6 +488,7 @@ function renderBilateral({ ex, lastAvg, root }) {
     sessionId = open.id;
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     await unlockAudio();
+    acquireWakeLock().catch(() => {});
     engine.start();
     startBtn.classList.add("hidden");
     skipBtn.classList.remove("hidden");
@@ -457,8 +497,9 @@ function renderBilateral({ ex, lastAvg, root }) {
 
   let lastPhaseIdx = -1;
 
-  engine.onPhase(async ({ phase, index }) => {
+  engine.onPhase(async ({ phase, index, remaining }) => {
     ring.setPhase(phase.label, phase.seconds);
+    totalRemaining.set(totalRemainingSec(phases, index, remaining));
     const prev = lastPhaseIdx;
     lastPhaseIdx = index;
     const prevPhase = phases[prev];
@@ -488,7 +529,10 @@ function renderBilateral({ ex, lastAvg, root }) {
     }
   });
 
-  engine.onTick(({ remaining }) => ring.setRemaining(remaining));
+  engine.onTick(({ remaining, index }) => {
+    ring.setRemaining(remaining);
+    totalRemaining.set(totalRemainingSec(phases, index, remaining));
+  });
 
   engine.onDone(async () => {
     const last = phases[phases.length - 1];
@@ -502,6 +546,7 @@ function renderBilateral({ ex, lastAvg, root }) {
     }
     skipBtn.classList.add("hidden");
     ring.setPhase("DONE", 0);
+    totalRemaining.set(0);
     indicator.set("Exercise complete");
 
     const all = (await setsForSession(sessionId)).filter((s) => s.exerciseId === ex.id);
@@ -517,7 +562,8 @@ function renderBilateral({ ex, lastAvg, root }) {
 
   root.appendChild(indicator.el);
   root.appendChild(ring.el);
-  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(totalRemaining.el);
+  root.appendChild(h("div", { style: "height:8px" }));
   root.appendChild(completed.el);
   root.appendChild(h("div", { style: "height:16px" }));
   if (weightFieldEl) root.appendChild(weightFieldEl);
@@ -530,7 +576,7 @@ function renderBilateral({ ex, lastAvg, root }) {
   root.appendChild(skipBtn);
   root.appendChild(endButtons.el);
 
-  return () => engine.stop();
+  return () => { engine.stop(); releaseWakeLock(); };
 }
 
 /* ----------------------------------------------------- continuous */
@@ -541,6 +587,8 @@ function renderContinuous({ ex, lastAvg, root }) {
   const ring = renderTimerRing(firstSec);
   ring.setPhase("READY", firstSec);
   const engine = makeIntervalEngine(phases);
+  const totalInitial = phases.reduce((sum, p) => sum + p.seconds, 0);
+  const totalRemaining = makeTotalRemaining(totalInitial);
 
   let sessionId = null;
   const weight = { value: ex.bodyweight ? 0 : null };
@@ -592,14 +640,16 @@ function renderContinuous({ ex, lastAvg, root }) {
     sessionId = open.id;
     if (weightFieldEl) lockField(weightFieldEl, weightStepper);
     await unlockAudio();
+    acquireWakeLock().catch(() => {});
     engine.start();
     startBtn.classList.add("hidden");
     skipBtn.classList.remove("hidden");
     indicator.set("Get ready · 10-minute block starting");
   });
 
-  engine.onPhase(({ phase }) => {
+  engine.onPhase(({ phase, index, remaining }) => {
     ring.setPhase(phase.label, phase.seconds);
+    totalRemaining.set(totalRemainingSec(phases, index, remaining));
     // Tap counter only appears once the WORK block actually begins, so the
     // user can't rack up taps during the 15-second get-ready countdown.
     if (phase.kind === "work") {
@@ -607,17 +657,22 @@ function renderContinuous({ ex, lastAvg, root }) {
       indicator.set("10-minute block · working");
     }
   });
-  engine.onTick(({ remaining }) => ring.setRemaining(remaining));
+  engine.onTick(({ remaining, index }) => {
+    ring.setRemaining(remaining);
+    totalRemaining.set(totalRemainingSec(phases, index, remaining));
+  });
   engine.onDone(() => {
     skipBtn.classList.add("hidden");
     endButtons.show();
     ring.setPhase("DONE", 0);
+    totalRemaining.set(0);
     indicator.set("Exercise complete");
   });
 
   root.appendChild(indicator.el);
   root.appendChild(ring.el);
-  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(totalRemaining.el);
+  root.appendChild(h("div", { style: "height:8px" }));
   if (weightFieldEl) root.appendChild(weightFieldEl);
   if (bodyweightBadge) root.appendChild(bodyweightBadge);
   root.appendChild(h("div", { style: "height:16px" }));
@@ -628,5 +683,5 @@ function renderContinuous({ ex, lastAvg, root }) {
   root.appendChild(skipBtn);
   root.appendChild(endButtons.el);
 
-  return () => engine.stop();
+  return () => { engine.stop(); releaseWakeLock(); };
 }
