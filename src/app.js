@@ -15,9 +15,18 @@ import { EditExerciseView } from "./views/edit-exercise.js";
 
 // Bumped on every shipped change so the user can verify on the Profile screen
 // which build is actually running on their device.
-export const APP_VERSION = "v0.11";
+export const APP_VERSION = "v0.12";
 
 async function boot() {
+  // Best-effort portrait lock. Unsupported on iOS Safari (the API is missing
+  // entirely there) and only works in fullscreen mode on most Android
+  // browsers, so we just swallow rejections.
+  try {
+    if (screen.orientation && typeof screen.orientation.lock === "function") {
+      screen.orientation.lock("portrait").catch(() => {});
+    }
+  } catch {}
+
   await seedIfEmpty(STARTER_EXERCISES);
 
   registerRoute("/home", HomeView);

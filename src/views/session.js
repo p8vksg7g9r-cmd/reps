@@ -300,12 +300,16 @@ function renderStandard({ ex, lastAvg, root }) {
   const totalRemaining = makeTotalRemaining(totalInitial);
 
   let sessionId = null;
-  const weight = { value: ex.bodyweight ? 0 : null };  // blank — user enters from scratch
+  // Pre-populate the weight from the exercise's stored workingWeight (which
+  // is updated at the end of every session). For brand-new exercises with no
+  // history, workingWeight is 0/undefined and the field shows blank.
+  const initialWeight = ex.bodyweight ? 0 : (ex.workingWeight > 0 ? ex.workingWeight : null);
+  const weight = { value: initialWeight };
   const setIds = new Map();
 
   const indicator = makeSetIndicator(`Set 1 of ${totalSets} · ready`, lastAvg);
   const weightStepper = ex.bodyweight ? null : stepper({
-    value: "",                                       // empty by default
+    value: initialWeight != null ? String(initialWeight) : "",
     step: 1,
     placeholder: "—",
     onChange: (n) => weight.value = n
@@ -447,12 +451,13 @@ function renderBilateral({ ex, lastAvg, root }) {
   const totalRemaining = makeTotalRemaining(totalInitial);
 
   let sessionId = null;
-  const weight = { value: ex.bodyweight ? 0 : null };
+  const initialWeight = ex.bodyweight ? 0 : (ex.workingWeight > 0 ? ex.workingWeight : null);
+  const weight = { value: initialWeight };
   const setIds = new Map();
 
   const indicator = makeSetIndicator("Round 1 of 3 · ready", lastAvg);
   const weightStepper = ex.bodyweight ? null : stepper({
-    value: "",
+    value: initialWeight != null ? String(initialWeight) : "",
     step: 0.5,
     placeholder: "—",
     onChange: (n) => weight.value = n
@@ -591,13 +596,14 @@ function renderContinuous({ ex, lastAvg, root }) {
   const totalRemaining = makeTotalRemaining(totalInitial);
 
   let sessionId = null;
-  const weight = { value: ex.bodyweight ? 0 : null };
+  const initialWeight = ex.bodyweight ? 0 : (ex.workingWeight > 0 ? ex.workingWeight : null);
+  const weight = { value: initialWeight };
   const tap = makeTapCounter();
   const tapWrap = h("div", { class: "hidden" }, [tap.el, h("p", { class: "tap-hint" }, "Tap to count · long-press to undo")]);
 
   const indicator = makeSetIndicator("10-minute block · ready", lastAvg);
   const weightStepper = ex.bodyweight ? null : stepper({
-    value: "",
+    value: initialWeight != null ? String(initialWeight) : "",
     step: 0.5,
     placeholder: "—",
     onChange: (n) => weight.value = n

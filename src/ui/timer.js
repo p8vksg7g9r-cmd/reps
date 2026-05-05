@@ -60,7 +60,12 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-function beep({ freq = 880, duration = 0.08, volume = 0.18, when = 0 } = {}) {
+// Volume notes: amplitudes were quiet enough to disappear under music in
+// earbuds. Pushed close to unity gain on the loud cues, with a 5ms attack
+// ramp so the high amplitude doesn't click. Triangle waveform on the loud
+// cues has more harmonic content than sine and cuts through music better
+// without sounding harsh.
+function beep({ freq = 880, duration = 0.08, volume = 0.4, when = 0, type = "sine" } = {}) {
   const c = audioCtx;
   if (!c) return;
   // Best-effort wake the context if a beep arrives mid-suspension.
@@ -69,27 +74,30 @@ function beep({ freq = 880, duration = 0.08, volume = 0.18, when = 0 } = {}) {
   const osc = c.createOscillator();
   const gain = c.createGain();
   osc.frequency.value = freq;
-  osc.type = "sine";
+  osc.type = type;
   osc.connect(gain);
   gain.connect(c.destination);
   const t = c.currentTime + when;
-  gain.gain.setValueAtTime(volume, t);
+  // 5ms linear attack from silence avoids the click that comes from
+  // setValueAtTime jumping straight to a loud value.
+  gain.gain.setValueAtTime(0.00001, t);
+  gain.gain.linearRampToValueAtTime(volume, t + 0.005);
   gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
   osc.start(t);
-  osc.stop(t + duration);
+  osc.stop(t + duration + 0.02);
 }
 
-export function tickBeep()       { beep({ freq: 660, duration: 0.05, volume: 0.10 }); }
-export function readyStartBeep() { beep({ freq: 520, duration: 0.10, volume: 0.16 }); }
+export function tickBeep()       { beep({ freq: 660,  duration: 0.06, volume: 0.40 }); }
+export function readyStartBeep() { beep({ freq: 520,  duration: 0.14, volume: 0.70, type: "triangle" }); }
 export function workStartBeep() {
-  beep({ freq: 880, duration: 0.12, volume: 0.22, when: 0.00 });
-  beep({ freq: 880, duration: 0.12, volume: 0.22, when: 0.16 });
+  beep({ freq: 880,  duration: 0.18, volume: 0.95, type: "triangle", when: 0.00 });
+  beep({ freq: 880,  duration: 0.18, volume: 0.95, type: "triangle", when: 0.22 });
 }
-export function restStartBeep()  { beep({ freq: 660, duration: 0.16, volume: 0.20 }); }
+export function restStartBeep()  { beep({ freq: 660,  duration: 0.22, volume: 0.85, type: "triangle" }); }
 export function exerciseEndBeep() {
-  beep({ freq: 660,  duration: 0.16, volume: 0.22, when: 0.00 });
-  beep({ freq: 880,  duration: 0.16, volume: 0.22, when: 0.18 });
-  beep({ freq: 1100, duration: 0.32, volume: 0.24, when: 0.36 });
+  beep({ freq: 660,  duration: 0.22, volume: 0.90, type: "triangle", when: 0.00 });
+  beep({ freq: 880,  duration: 0.22, volume: 0.90, type: "triangle", when: 0.24 });
+  beep({ freq: 1100, duration: 0.40, volume: 0.95, type: "triangle", when: 0.48 });
 }
 
 // Backward-compat aliases.

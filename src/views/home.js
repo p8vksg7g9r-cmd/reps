@@ -80,6 +80,36 @@ export async function HomeView(_params, root) {
     delta: delta.volume === 0 ? "no change" : fmtDelta(Math.round(delta.volume), " kg")
   });
 
+  // Training load = total weekly volume in kg ÷ user bodyweight in kg.
+  // Higher numbers represent more relative work. Trend compares to the
+  // previous week using the same bodyweight reference.
+  const bw = lastWeight?.kg && lastWeight.kg > 0 ? lastWeight.kg : null;
+  const ratio     = bw ? current.volume  / bw : null;
+  const ratioPrev = bw ? summary.previous.volume / bw : null;
+  const ratioDelta = (ratio != null && ratioPrev != null) ? ratio - ratioPrev : null;
+
+  const arrow =
+    ratioDelta == null ? "" :
+    ratioDelta >  0.5  ? "↑" :
+    ratioDelta < -0.5  ? "↓" :
+                          "→";
+  const deltaClass =
+    ratioDelta == null ? "delta" :
+    ratioDelta >  0.5  ? "delta up" :
+    ratioDelta < -0.5  ? "delta down" :
+                          "delta";
+  const deltaText =
+    bw == null              ? "Log a bodyweight to track this" :
+    ratioDelta == null      ? "no prior week" :
+    ratioDelta === 0        ? `flat ${arrow} vs last week` :
+                              `${ratioDelta > 0 ? "+" : "−"}${Math.abs(Math.round(ratioDelta))}× ${arrow} vs last week`;
+
+  const loadStat = h("div", { class: "stat" }, [
+    h("div", { class: "label" }, "Training load · weekly"),
+    h("div", { class: "value mono" }, ratio == null ? "—" : `${Math.round(ratio)}× BW`),
+    h("div", { class: deltaClass }, deltaText)
+  ]);
+
   const ctaLabel = openSession ? "Add an exercise to this session" : "Start a session";
   const cta = h("a", { href: "#/exercises", class: "btn btn-primary btn-block btn-lg" }, ctaLabel);
 
@@ -109,7 +139,7 @@ export async function HomeView(_params, root) {
 
   root.appendChild(head);
   if (topBanner) root.appendChild(topBanner);
-  root.appendChild(h("div", { class: "stack" }, [grid, volStat, cta]));
+  root.appendChild(h("div", { class: "stack" }, [grid, volStat, loadStat, cta]));
   if (recentSection) {
     root.appendChild(h("div", { style: "height: 24px" }));
     root.appendChild(recentSection);
