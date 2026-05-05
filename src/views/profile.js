@@ -1,5 +1,6 @@
-import { getProfile, saveProfile, listWeights, logWeight, exportAll, importAll } from "../db/repo.js";
+import { getProfile, saveProfile, listWeights, logWeight, importAll } from "../db/repo.js";
 import { h, eyebrow, field, fmtKg, fmtAge } from "../ui/components.js";
+import { shareOrDownloadBackup } from "../ui/share.js";
 import { APP_VERSION } from "../app.js";
 
 export async function ProfileView(_params, root) {
@@ -97,12 +98,8 @@ export async function ProfileView(_params, root) {
   root.appendChild(h("div", { class: "version-footer" }, `REPS · ${APP_VERSION}`));
 
   async function doExport() {
-    const data = await exportAll();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = h("a", { href: url, download: `reps-backup-${new Date().toISOString().slice(0,10)}.json` });
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    try { await shareOrDownloadBackup(); }
+    catch (err) { alert("Backup failed: " + err.message); }
   }
 
   async function doImport(e) {

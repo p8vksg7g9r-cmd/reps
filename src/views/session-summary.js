@@ -1,6 +1,7 @@
 import { getSession, setsForSession, getExercise } from "../db/repo.js";
 import { setVolume } from "../domain/volume.js";
 import { h, eyebrow, fmtDay, fmtVolume } from "../ui/components.js";
+import { shareOrDownloadBackup } from "../ui/share.js";
 
 function fmtDuration(ms) {
   if (!ms || ms < 0) return "—";
@@ -98,6 +99,22 @@ export async function SessionSummaryView(params, root) {
 
   const cta = h("a", { href: "#/home", class: "btn btn-primary btn-block btn-lg" }, "Back to home");
 
+  const backupBtn = h("button", { class: "btn btn-ghost btn-block btn-lg" }, "Backup");
+  backupBtn.addEventListener("click", async () => {
+    backupBtn.disabled = true;
+    const original = backupBtn.textContent;
+    backupBtn.textContent = "Preparing…";
+    try {
+      const result = await shareOrDownloadBackup();
+      backupBtn.textContent = result === "downloaded" ? "Downloaded" : result === "shared" ? "Shared" : original;
+      setTimeout(() => { backupBtn.textContent = original; backupBtn.disabled = false; }, 1600);
+    } catch (err) {
+      backupBtn.textContent = "Backup failed";
+      console.error(err);
+      setTimeout(() => { backupBtn.textContent = original; backupBtn.disabled = false; }, 2000);
+    }
+  });
+
   root.appendChild(head);
   root.appendChild(h("div", { class: "stack" }, [meta, totals]));
   if (exerciseBlocks.length === 0) {
@@ -111,5 +128,5 @@ export async function SessionSummaryView(params, root) {
     root.appendChild(h("div", { class: "stack" }, exerciseBlocks));
   }
   root.appendChild(h("div", { style: "height: 32px" }));
-  root.appendChild(cta);
+  root.appendChild(h("div", { class: "stack-sm" }, [cta, backupBtn]));
 }

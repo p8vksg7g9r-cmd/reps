@@ -15,7 +15,7 @@ import { EditExerciseView } from "./views/edit-exercise.js";
 
 // Bumped on every shipped change so the user can verify on the Profile screen
 // which build is actually running on their device.
-export const APP_VERSION = "v0.12";
+export const APP_VERSION = "v0.13";
 
 async function boot() {
   // Best-effort portrait lock. Unsupported on iOS Safari (the API is missing
