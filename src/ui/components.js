@@ -260,6 +260,15 @@ export function fmtMeters(m) {
   return `${Math.round(m)} m`;
 }
 
+/** Format seconds as "Xh Ym" — used for weekly cardio totals where seconds
+ *  precision would be noise. Sub-minute durations show as "0h 0m". */
+export function fmtHoursMinutes(sec) {
+  if (!sec || sec < 0) return "0h 0m";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
 /** Format seconds as M:SS or H:MM:SS. */
 export function fmtMmSs(sec) {
   if (sec == null || Number.isNaN(Number(sec))) return "—";
