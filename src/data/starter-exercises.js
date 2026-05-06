@@ -17,5 +17,9 @@ export const STARTER_EXERCISES = [
   // Bilateral set type (3 rounds: work-L / work-R / rest)
   { name: "Standing Dumbbell Curl",             setType: "bilateral", rounds: 3, standardKey: "db_curl" },
   { name: "Overhead Dumbbell Triceps Extension",setType: "bilateral", rounds: 3, standardKey: "db_triceps_extension" },
-  { name: "Standing Knee Raise",                setType: "bilateral", rounds: 3, standardKey: null }
+  { name: "Standing Knee Raise",                setType: "bilateral", rounds: 3, standardKey: null },
+
+  // Cardio — manual metric logging only, no timer / weight / reps
+  { name: "Swimming",                           setType: "cardio_swim", category: "cardio" },
+  { name: "Stationary Bike",                    setType: "cardio_bike", category: "cardio" }
 ];

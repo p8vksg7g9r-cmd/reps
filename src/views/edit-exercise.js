@@ -1,5 +1,6 @@
 import { getSession, getExercise, setsForSessionExercise, updateSet } from "../db/repo.js";
 import { h, eyebrow, stepper, field, fmtDay, setTypeStructure } from "../ui/components.js";
+import { isCardioSetType } from "../domain/volume.js";
 
 /**
  * /edit-exercise/:sessionId/:exerciseId
@@ -52,6 +53,12 @@ export async function EditExerciseView(params, root) {
   const sortedSets = sets.slice().sort((a, b) =>
     a.round - b.round || a.completedAt - b.completedAt
   );
+
+  // Cardio rows have a totally different schema — render and persist them
+  // through a dedicated path below.
+  if (sortedSets[0] && isCardioSetType(sortedSets[0].setType)) {
+    return renderCardioEdit({ root, sortedSets, exercise });
+  }
 
   const isBilateral = exercise?.setType === "bilateral";
   const isBodyweight = !!exercise?.bodyweight;
@@ -148,3 +155,100 @@ export async function EditExerciseView(params, root) {
   root.appendChild(error);
   root.appendChild(h("div", { class: "stack-sm" }, [saveBtn, cancelBtn]));
 }
+
+/* ----------------------- cardio editing ----------------------- */
+
+function renderCardioEdit({ root, sortedSets, exercise }) {
+  // Cardio sessions have one set per exercise per session; edit that one row.
+  const set = sortedSets[0];
+  const setType = set.setType;
+  const m = { ...(set.metrics || {}) };
+
+  const error = h("p", {
+    class: "body-s hidden",
+    style: "color: var(--terracotta); margin: 0; text-align:center; font-weight:600"
+  }, "");
+  function showError(msg) { error.textContent = msg; error.classList.remove("hidden"); }
+  function hideError() { error.classList.add("hidden"); }
+
+  const cancelBtn = h("a", { href: "#/history", class: "btn btn-ghost btn-block" }, "Cancel");
+  const saveBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Save changes");
+
+  if (setType === "cardio_swim") {
+    const distStp = stepper({ value: m.distanceM != null ? String(m.distanceM) : "", step: 50, placeholder: "—",
+      onChange: (n) => { m.distanceM = n; } });
+    const initialMin = m.durationSec != null ? Math.floor(m.durationSec / 60) : null;
+    const initialSec = m.durationSec != null ? (m.durationSec % 60) : null;
+    let mins = initialMin, secs = initialSec;
+    const minStp = stepper({ value: initialMin != null ? String(initialMin) : "", step: 1, placeholder: "—",
+      onChange: (n) => { mins = n; } });
+    const secStp = stepper({ value: initialSec != null ? String(initialSec) : "", step: 5, placeholder: "—",
+      onChange: (n) => { secs = n; } });
+
+    saveBtn.addEventListener("click", async () => {
+      const dInput = distStp.querySelector("input");
+      const d = (dInput && dInput.value !== "") ? Number(dInput.value) : null;
+      const minInput = minStp.querySelector("input");
+      const secInput = secStp.querySelector("input");
+      const mn = (minInput && minInput.value !== "") ? Number(minInput.value) : null;
+      const sc = (secInput && secInput.value !== "") ? Number(secInput.value) : 0;
+      if (d == null || !(d > 0)) { showError("Distance: must be > 0."); return; }
+      if (mn == null && sc == null) { showError("Time: enter minutes and/or seconds."); return; }
+      if ((mn ?? 0) < 0 || sc < 0 || sc >= 60) { showError("Time: minutes ≥ 0, seconds 0–59."); return; }
+      hideError();
+      const durationSec = (Number(mn) || 0) * 60 + Number(sc);
+      await updateSet(set.id, { metrics: { distanceM: Math.round(d), durationSec: Math.round(durationSec) } });
+      location.hash = "#/history";
+    });
+
+    root.appendChild(h("div", { class: "edit-set" }, [
+      h("div", { class: "row-label" }, "Swimming"),
+      field("Distance (m)", distStp),
+      h("div", { style: "height:8px" }),
+      h("div", { class: "grid-2" }, [field("Minutes", minStp), field("Seconds", secStp)])
+    ]));
+  } else {
+    // cardio_bike
+    const initialMin = m.durationSec != null ? Math.round(m.durationSec / 60) : null;
+    const minStp = stepper({ value: initialMin != null ? String(initialMin) : "", step: 1, placeholder: "—",
+      onChange: () => {} });
+    const metStp = stepper({ value: m.metMin    != null ? String(m.metMin)    : "", step: 1, placeholder: "optional",
+      onChange: () => {} });
+    const wStp   = stepper({ value: m.avgPowerW != null ? String(m.avgPowerW) : "", step: 5, placeholder: "optional",
+      onChange: () => {} });
+    const hrStp  = stepper({ value: m.avgHrBpm  != null ? String(m.avgHrBpm)  : "", step: 1, placeholder: "optional",
+      onChange: () => {} });
+
+    saveBtn.addEventListener("click", async () => {
+      const read = (s) => { const i = s.querySelector("input"); return (i && i.value !== "") ? Number(i.value) : null; };
+      const mn  = read(minStp);
+      const met = read(metStp);
+      const w   = read(wStp);
+      const hr  = read(hrStp);
+      if (mn == null || !(mn > 0)) { showError("Time: must be > 0 minutes."); return; }
+      hideError();
+      const newMetrics = { durationSec: Math.round(mn * 60) };
+      if (met != null && met > 0) newMetrics.metMin = Math.round(met);
+      if (w   != null && w   > 0) newMetrics.avgPowerW = Math.round(w);
+      if (hr  != null && hr  > 0) newMetrics.avgHrBpm  = Math.round(hr);
+      await updateSet(set.id, { metrics: newMetrics });
+      location.hash = "#/history";
+    });
+
+    root.appendChild(h("div", { class: "edit-set" }, [
+      h("div", { class: "row-label" }, "Stationary Bike"),
+      field("Time (minutes)", minStp),
+      h("div", { style: "height:8px" }),
+      field("MET·minutes", metStp),
+      h("div", { style: "height:8px" }),
+      field("Average power (W)", wStp),
+      h("div", { style: "height:8px" }),
+      field("Average heart rate (bpm)", hrStp)
+    ]));
+  }
+
+  root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(error);
+  root.appendChild(h("div", { class: "stack-sm" }, [saveBtn, cancelBtn]));
+}
+

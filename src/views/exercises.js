@@ -44,30 +44,60 @@ export async function ExercisesView(_params, root) {
     ]);
   }
 
-  const list = h("div", { class: "stack-sm" }, enriched.map(({ ex, lastAt }) => {
-    const rest = restState(lastAt);
-    const weightLabel = ex.bodyweight ? " · BW" : (ex.workingWeight ? ` · ${fmtKg(ex.workingWeight)}` : "");
+  function buildRow({ ex, lastAt }) {
+    const isCardio = ex.category === "cardio";
+    const rest = isCardio ? { resting: false, daysLeft: 0 } : restState(lastAt);
+    const weightLabel = isCardio
+      ? ""
+      : ex.bodyweight ? " · BW" : (ex.workingWeight ? ` · ${fmtKg(ex.workingWeight)}` : "");
     const sub = `${setTypeStructure(ex)}${weightLabel}`;
+
+    const trailing = rest.resting
+      ? badge(`${rest.daysLeft}d rest`, "badge-warn")
+      : isCardio ? badge("Cardio", "badge-brass")
+      : ex.bodyweight ? badge("BW", "badge-brass")
+      : h("span", { class: "eyebrow" }, "Go →");
 
     const row = h("a", {
       class: `ex-row${rest.resting ? " resting" : ""}`,
       href: "#",
       onclick: (e) => {
         e.preventDefault();
-        openChooser(ex, rest);
+        if (isCardio) {
+          // Cardio always goes through manual entry — no timer mode.
+          location.hash = `#/quicklog/${ex.id}`;
+        } else {
+          openChooser(ex, rest);
+        }
       }
     }, [
       h("div", { class: "meta" }, [
         h("div", { class: "name" }, ex.name),
         h("div", { class: "sub" }, sub)
       ]),
-      rest.resting
-        ? badge(`${rest.daysLeft}d rest`, "badge-warn")
-        : (ex.bodyweight ? badge("BW", "badge-brass") : h("span", { class: "eyebrow" }, "Go →"))
+      trailing
     ]);
-
     return row;
-  }));
+  }
+
+  // Group: Strength first, then Cardio. Each section sorted alphabetically.
+  const strength = enriched.filter(({ ex }) => ex.category !== "cardio");
+  const cardio   = enriched.filter(({ ex }) => ex.category === "cardio");
+
+  const sections = [];
+  if (strength.length) {
+    sections.push(h("div", {}, [
+      h("div", { class: "eyebrow", style: "margin: 8px 4px 8px" }, "Strength"),
+      h("div", { class: "stack-sm" }, strength.map(buildRow))
+    ]));
+  }
+  if (cardio.length) {
+    sections.push(h("div", { style: "margin-top: 24px" }, [
+      h("div", { class: "eyebrow", style: "margin: 8px 4px 8px" }, "Cardio"),
+      h("div", { class: "stack-sm" }, cardio.map(buildRow))
+    ]));
+  }
+  const list = h("div", {}, sections);
 
   root.appendChild(head);
   if (openBanner) root.appendChild(openBanner);

@@ -3,12 +3,16 @@ import { h, eyebrow, modal, field, fmtKg, setTypeStructure } from "../ui/compone
 
 // rounds policy per setType — null means "no rounds applicable"
 const FIXED_ROUNDS = {
-  standard: null,             // user picks
-  bilateral: 3,
-  continuous: null,           // single block
-  six_ten: 6,
-  ninety_bilateral: 2
+  standard:         null,     // user picks
+  bilateral:        3,
+  continuous:       null,     // single block
+  six_ten:          6,
+  ninety_bilateral: 2,
+  cardio_swim:      null,
+  cardio_bike:      null
 };
+
+const CARDIO_TYPES = new Set(["cardio_swim", "cardio_bike"]);
 
 export async function ManageExercisesView(_params, root) {
   const exercises = await listExercises();
@@ -102,20 +106,33 @@ export async function ManageExercisesView(_params, root) {
     nameInput.addEventListener("input", () => v.name = nameInput.value.trim());
 
     const typeSel = h("select", {}, [
-      h("option", { value: "standard",         selected: v.setType === "standard" },         "Standard"),
-      h("option", { value: "bilateral",        selected: v.setType === "bilateral" },        "Bilateral"),
-      h("option", { value: "continuous",       selected: v.setType === "continuous" },       "10/10"),
-      h("option", { value: "six_ten",          selected: v.setType === "six_ten" },          "6/10"),
-      h("option", { value: "ninety_bilateral", selected: v.setType === "ninety_bilateral" }, "90 Bilateral")
+      h("optgroup", { label: "Strength" }, [
+        h("option", { value: "standard",         selected: v.setType === "standard" },         "Standard"),
+        h("option", { value: "bilateral",        selected: v.setType === "bilateral" },        "Bilateral"),
+        h("option", { value: "continuous",       selected: v.setType === "continuous" },       "10/10"),
+        h("option", { value: "six_ten",          selected: v.setType === "six_ten" },          "6/10"),
+        h("option", { value: "ninety_bilateral", selected: v.setType === "ninety_bilateral" }, "90 Bilateral")
+      ]),
+      h("optgroup", { label: "Cardio" }, [
+        h("option", { value: "cardio_swim", selected: v.setType === "cardio_swim" }, "Swimming"),
+        h("option", { value: "cardio_bike", selected: v.setType === "cardio_bike" }, "Stationary Bike")
+      ])
     ]);
     typeSel.addEventListener("change", () => {
       v.setType = typeSel.value;
-      // Auto-set fixed rounds for non-standard types; standard keeps user-editable.
+      const isCardio = CARDIO_TYPES.has(v.setType);
+      v.category = isCardio ? "cardio" : "strength";
       const fixed = FIXED_ROUNDS[v.setType];
       if (fixed !== null) v.rounds = fixed;
       else if (v.rounds == null) v.rounds = 3;
       roundsInput.value = v.rounds != null ? String(v.rounds) : "";
       roundsInput.disabled = v.setType !== "standard";
+      // Hide weight + bodyweight controls when the type is cardio.
+      strengthOnly.style.display = isCardio ? "none" : "";
+      if (isCardio) {
+        v.bodyweight = false;
+        v.workingWeight = 0;
+      }
     });
 
     const roundsInput = h("input", { type: "number", value: String(v.rounds ?? 3), min: "1" });
@@ -139,21 +156,28 @@ export async function ManageExercisesView(_params, root) {
       if (v.bodyweight) v.workingWeight = 0;
     });
 
+    // Group weight controls so we can hide them as a unit for cardio types.
+    const strengthOnly = h("div", {}, [
+      field("Working weight (kg)", weightInput),
+      h("div", { style: "margin-top: 4px" }, bwToggle)
+    ]);
+    if (CARDIO_TYPES.has(v.setType)) strengthOnly.style.display = "none";
+
     const m = modal([
       eyebrow(eyebrowText),
       h("h2", { class: "display-m" }, title),
       field("Name", nameInput),
       field("Set type", typeSel),
       field("Rounds (standard only)", roundsInput),
-      field("Working weight (kg)", weightInput),
-      h("div", { style: "margin-top: 4px" }, bwToggle),
+      strengthOnly,
       h("div", { class: "row", style: "margin-top: 16px" }, [
         h("button", { class: "btn btn-ghost", onclick: () => m.close() }, "Cancel"),
         h("div", { class: "spacer" }),
         h("button", { class: "btn btn-primary", onclick: async () => {
-          // Re-pin fixed rounds in case the user changed type mid-edit.
           const fixed = FIXED_ROUNDS[v.setType];
           if (fixed !== null) v.rounds = fixed;
+          v.category = CARDIO_TYPES.has(v.setType) ? "cardio" : "strength";
+          if (v.category === "cardio") { v.bodyweight = false; v.workingWeight = 0; }
           await onSubmit(v);
           m.close();
           window.dispatchEvent(new HashChangeEvent("hashchange"));

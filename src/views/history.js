@@ -2,7 +2,8 @@ import { allSessions, listExercises, deleteExerciseFromSession } from "../db/rep
 import { tx, reqAsPromise } from "../db/schema.js";
 import { groupSessionsByDay, startOfIsoWeek, startOfMonth } from "../domain/week.js";
 import { setVolume } from "../domain/volume.js";
-import { h, eyebrow, fmtVolume, fmtDay, iconPencil, iconTrash } from "../ui/components.js";
+import { h, eyebrow, fmtVolume, fmtDay, iconPencil, iconTrash, cardioMetricsLine } from "../ui/components.js";
+import { isCardioSetType } from "../domain/volume.js";
 
 async function allSets() {
   const t = await tx(["sets"]);
@@ -88,7 +89,7 @@ export async function HistoryView(_params, root) {
     const header = h("a", { class: "row-between", href: `#/summary/${session.id}`, style: "display:flex" }, [
       h("div", { style: "font-weight:600" }, `Session · ${fmtTime(session.startedAt)}`),
       h("div", { class: "mono", style: "font-size:12px; color: var(--ink-mute)" },
-        `${orderedIds.length} ex · ${fmtVolume(sessionVol)}`)
+        `${orderedIds.length} ex${sessionVol > 0 ? ` · ${fmtVolume(sessionVol)}` : ""}`)
     ]);
     card.appendChild(header);
 
@@ -116,19 +117,25 @@ export async function HistoryView(_params, root) {
         }
       }, [iconTrash()]);
 
-      const lines = exSets.map((set) => h("div", { class: "ex-line" }, [
-        h("span", {}, `${set.setType === "bilateral" ? "R" : "S"}${set.round}`),
-        h("span", {}, `${set.weight ? `${set.weight}kg × ` : ""}${set.reps}${set.setType === "bilateral" ? " /side" : ""}`)
-      ]));
+      const isCardio = exSets[0] && isCardioSetType(exSets[0].setType);
+      const lines = isCardio
+        ? exSets.map((set) => h("div", { class: "ex-line" }, [
+            h("span", {}, "—"),
+            h("span", {}, cardioMetricsLine(set))
+          ]))
+        : exSets.map((set) => h("div", { class: "ex-line" }, [
+            h("span", {}, `${set.setType === "bilateral" ? "R" : "S"}${set.round}`),
+            h("span", {}, `${set.weight ? `${set.weight}kg × ` : ""}${set.reps}${set.setType === "bilateral" ? " /side" : ""}`)
+          ]));
 
       card.appendChild(h("div", { class: "ex-block" }, [
         h("div", { class: "ex-head" }, [
           h("div", { class: "name" }, ex?.name ?? "Exercise (deleted)"),
           h("div", { class: "actions" }, [
-            h("span", { class: "vol" }, fmtVolume(exVol)),
+            isCardio ? null : h("span", { class: "vol" }, fmtVolume(exVol)),
             editBtn,
             delBtn
-          ])
+          ].filter(Boolean))
         ]),
         h("div", { style: "margin-top: 6px" }, lines)
       ]));

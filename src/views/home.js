@@ -131,7 +131,7 @@ export async function HomeView(_params, root) {
       }, [
         h("div", { class: "meta" }, [
           h("div", { class: "name" }, new Date(s.startedAt).toLocaleDateString()),
-          h("div", { class: "sub" }, `${subtitle} · ${fmtVolume(vol)}`)
+          h("div", { class: "sub" }, vol > 0 ? `${subtitle} · ${fmtVolume(vol)}` : subtitle)
         ])
       ]);
     })

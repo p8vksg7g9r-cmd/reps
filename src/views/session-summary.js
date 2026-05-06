@@ -1,6 +1,6 @@
 import { getSession, setsForSession, getExercise } from "../db/repo.js";
-import { setVolume } from "../domain/volume.js";
-import { h, eyebrow, fmtDay, fmtVolume } from "../ui/components.js";
+import { setVolume, isCardioSetType } from "../domain/volume.js";
+import { h, eyebrow, fmtDay, fmtVolume, cardioMetricsLine } from "../ui/components.js";
 import { shareOrDownloadBackup } from "../ui/share.js";
 
 function fmtDuration(ms) {
@@ -32,7 +32,11 @@ export async function SessionSummaryView(params, root) {
   const exById = new Map(exercises.filter(Boolean).map((e) => [e.id, e]));
 
   const totalVolume = sets.reduce((sum, s) => sum + setVolume(s), 0);
-  const totalReps = sets.reduce((sum, s) => sum + (Number(s.reps) || 0), 0);
+  // Cardio sets carry a placeholder reps=1 so they pass the "complete" filter,
+  // but they shouldn't be counted in the per-session reps total.
+  const totalReps = sets
+    .filter((s) => !isCardioSetType(s.setType))
+    .reduce((sum, s) => sum + (Number(s.reps) || 0), 0);
   const duration = session.endedAt ? session.endedAt - session.startedAt : null;
 
   const head = h("div", { class: "page-head" }, [
@@ -78,6 +82,22 @@ export async function SessionSummaryView(params, root) {
     const exSets = sets
       .filter((s) => s.exerciseId === eid)
       .sort((a, b) => a.round - b.round);
+    const isCardio = exSets[0] && isCardioSetType(exSets[0].setType);
+
+    if (isCardio) {
+      const lines = exSets.map((s) => h("div", { class: "ex-line" }, [
+        h("span", {}, "—"),
+        h("span", {}, cardioMetricsLine(s))
+      ]));
+      return h("div", { class: "card stack-sm" }, [
+        h("div", { class: "row-between" }, [
+          h("div", { style: "font-family: var(--font-display); font-weight: 700; font-size: 16px" }, ex?.name ?? "Exercise"),
+          h("span", { class: "badge badge-brass mono" }, "Cardio")
+        ]),
+        h("div", {}, lines)
+      ]);
+    }
+
     const vol = exSets.reduce((sum, s) => sum + setVolume(s), 0);
     const setLines = exSets.map((s) => h("div", { class: "ex-line" }, [
       h("span", {}, `${s.setType === "bilateral" ? "Round" : "Set"} ${s.round}`),

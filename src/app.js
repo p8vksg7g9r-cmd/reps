@@ -1,6 +1,6 @@
 // REPS bootstrap: registers SW, seeds DB, mounts router.
 import { registerRoute, mount, start } from "./router.js";
-import { seedIfEmpty } from "./db/repo.js";
+import { seedIfEmpty, seedCardioIfNeeded } from "./db/repo.js";
 import { STARTER_EXERCISES } from "./data/starter-exercises.js";
 
 import { HomeView } from "./views/home.js";
@@ -14,7 +14,7 @@ import { SessionSummaryView } from "./views/session-summary.js";
 import { EditExerciseView } from "./views/edit-exercise.js";
 import { QuickLogView } from "./views/quicklog.js";
 
-export const APP_VERSION = "v0.14";
+export const APP_VERSION = "v0.15";
 
 async function boot() {
   // Best-effort portrait lock. Unsupported on iOS Safari (no API at all);
@@ -26,6 +26,7 @@ async function boot() {
   } catch {}
 
   await seedIfEmpty(STARTER_EXERCISES);
+  await seedCardioIfNeeded();
 
   registerRoute("/home", HomeView);
   registerRoute("/exercises", ExercisesView);

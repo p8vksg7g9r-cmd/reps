@@ -189,6 +189,8 @@ export function setTypeName(setType) {
     case "continuous":       return "10/10";
     case "six_ten":          return "6/10";
     case "ninety_bilateral": return "90 Bilateral";
+    case "cardio_swim":      return "Swimming";
+    case "cardio_bike":      return "Stationary Bike";
     default: return setType || "Set";
   }
 }
@@ -200,8 +202,47 @@ export function setTypeStructure(ex) {
     case "continuous":       return `10/10 · 10 min block`;
     case "six_ten":          return `6/10 · 6 sets`;
     case "ninety_bilateral": return `90 Bilateral · 2 × 90s`;
+    case "cardio_swim":      return "Cardio · Swimming";
+    case "cardio_bike":      return "Cardio · Stationary Bike";
     default: return setTypeName(ex?.setType);
   }
+}
+
+/** Format meters as either "1.2 km" (>=1000) or "850 m". */
+export function fmtMeters(m) {
+  if (m == null || Number.isNaN(Number(m))) return "—";
+  m = Number(m);
+  if (m >= 1000) return `${(m / 1000).toFixed(2).replace(/\.?0+$/, "")} km`;
+  return `${Math.round(m)} m`;
+}
+
+/** Format seconds as M:SS or H:MM:SS. */
+export function fmtMmSs(sec) {
+  if (sec == null || Number.isNaN(Number(sec))) return "—";
+  sec = Math.max(0, Math.round(Number(sec)));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Compose a one-line metrics summary for a cardio set row. */
+export function cardioMetricsLine(set) {
+  if (!set || !set.metrics) return "—";
+  const m = set.metrics;
+  if (set.setType === "cardio_swim") {
+    return `${fmtMeters(m.distanceM)} · ${fmtMmSs(m.durationSec)}`;
+  }
+  if (set.setType === "cardio_bike") {
+    const parts = [];
+    if (m.durationSec) parts.push(`${Math.round(m.durationSec / 60)} min`);
+    if (m.metMin)      parts.push(`${m.metMin} MET·min`);
+    if (m.avgPowerW)   parts.push(`${m.avgPowerW} W`);
+    if (m.avgHrBpm)    parts.push(`${m.avgHrBpm} bpm`);
+    return parts.length ? parts.join(" · ") : "—";
+  }
+  return "—";
 }
 
 export function fmtAge(dobMs) {

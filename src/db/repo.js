@@ -66,15 +66,36 @@ export async function addExercise(ex) {
   const t = await tx(["exercises"], "readwrite");
   const id = await reqAsPromise(t.objectStore("exercises").add({
     name: ex.name,
-    setType: ex.setType,                 // "standard" | "bilateral" | "continuous"
-    rounds: ex.rounds ?? null,           // standard: N; bilateral: 3 (fixed); continuous: null
+    setType: ex.setType,                 // see set-type registry in components.js
+    rounds: ex.rounds ?? null,           // standard: N; bilateral: 3; cardio/continuous: null
     workingWeight: ex.workingWeight ?? 0,
-    standardKey: ex.standardKey ?? null, // points into strength-standards
-    bodyweight: !!ex.bodyweight,         // true = no external weight, hide weight field in session
+    standardKey: ex.standardKey ?? null, // strength-standards lookup key (cardio: null)
+    bodyweight: !!ex.bodyweight,         // true = no external weight, hide weight field
+    category: ex.category || "strength", // "strength" | "cardio"
     createdAt: Date.now()
   }));
   await txDone(t);
   return id;
+}
+
+/** Add only the cardio starter rows that the user doesn't already have, and
+ *  remember we did the upgrade in localStorage so a deletion sticks the next
+ *  time the app boots. New installs get cardio via the regular seedIfEmpty
+ *  pass, so this only runs as a backfill for users on the previous schema. */
+export async function seedCardioIfNeeded() {
+  const flagKey = "reps:seeded:cardio_v1";
+  if (typeof localStorage !== "undefined" && localStorage.getItem(flagKey)) return;
+  try {
+    const all = await listExercises();
+    const haveTypes = new Set(all.map((e) => e.setType));
+    if (!haveTypes.has("cardio_swim")) {
+      await addExercise({ name: "Swimming", setType: "cardio_swim", category: "cardio" });
+    }
+    if (!haveTypes.has("cardio_bike")) {
+      await addExercise({ name: "Stationary Bike", setType: "cardio_bike", category: "cardio" });
+    }
+    if (typeof localStorage !== "undefined") localStorage.setItem(flagKey, "1");
+  } catch {}
 }
 
 export async function updateExercise(id, patch) {
