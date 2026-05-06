@@ -262,27 +262,48 @@ export async function lastSessionForExercise(exerciseId, { excludeSessionId } = 
 }
 
 /* -------------------- export / import -------------------- */
+// Backup contract: only USER DATA round-trips. The exercises store is
+// app-managed structural data — its IDs and rows belong to the app code +
+// the Manage Exercises UI, not to the backup file.
+//
+// Exported keys:
+//   profile     — DOB / sex / height / etc.
+//   weightLog   — bodyweight history (treated as profile data)
+//   sessions    — gym visits
+//   sets        — per-set rows (carry exerciseId references that the
+//                 importer trusts but does not validate)
+// NOT exported:
+//   exercises   — definitions live in app code + the user's Manage screen
+//
+// Old v1 backups did include the exercises array. importAll accepts those
+// for backwards-compat but silently ignores the exercises field.
+
+const USER_STORES = ["profile", "weightLog", "sessions", "sets"];
+const EXPORT_VERSION = 2;
 
 export async function exportAll() {
   const db = await openDb();
-  const stores = ["profile", "weightLog", "exercises", "sessions", "sets"];
-  const t = db.transaction(stores, "readonly");
-  const out = { version: 1, exportedAt: Date.now() };
-  for (const s of stores) {
+  const t = db.transaction(USER_STORES, "readonly");
+  const out = { version: EXPORT_VERSION, exportedAt: Date.now() };
+  for (const s of USER_STORES) {
     out[s] = await reqAsPromise(t.objectStore(s).getAll());
   }
   return out;
 }
 
 export async function importAll(data, { wipe = true } = {}) {
-  if (!data || data.version !== 1) throw new Error("unsupported export version");
+  if (!data) throw new Error("no data");
+  if (!(data.version === 1 || data.version === 2)) {
+    throw new Error("unsupported export version");
+  }
   const db = await openDb();
-  const stores = ["profile", "weightLog", "exercises", "sessions", "sets"];
-  const t = db.transaction(stores, "readwrite");
-  if (wipe) for (const s of stores) t.objectStore(s).clear();
-  for (const s of stores) {
+  const t = db.transaction(USER_STORES, "readwrite");
+  if (wipe) for (const s of USER_STORES) t.objectStore(s).clear();
+  for (const s of USER_STORES) {
     for (const row of (data[s] || [])) t.objectStore(s).put(row);
   }
+  // Note: we deliberately do NOT touch the exercises store, even if a
+  // legacy v1 backup carried one — exercises are app-managed.
   await txDone(t);
 }
 

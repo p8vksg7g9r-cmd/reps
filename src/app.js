@@ -14,7 +14,7 @@ import { SessionSummaryView } from "./views/session-summary.js";
 import { EditExerciseView } from "./views/edit-exercise.js";
 import { QuickLogView } from "./views/quicklog.js";
 
-export const APP_VERSION = "v0.16";
+export const APP_VERSION = "v0.17";
 
 async function boot() {
   // Best-effort portrait lock. Unsupported on iOS Safari (no API at all);

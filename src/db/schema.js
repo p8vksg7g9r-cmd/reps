@@ -31,27 +31,45 @@ export function openDb() {
   if (_opening) return _opening;
   _opening = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (e) => {
+    req.onupgradeneeded = () => {
+      // Defensive migration policy:
+      //   * NEVER call store.clear() or db.deleteObjectStore() from here.
+      //   * Only create stores / indexes that don't already exist.
+      //   * Adding a new column to an existing row's payload is invisible
+      //     to IndexedDB — no migration step needed.
+      // This is safe to re-run if the database somehow ends up at a
+      // version-correct state but missing a store (recovery path).
       const db = req.result;
-      const oldV = e.oldVersion;
-      if (oldV < 1) {
-        const profile = db.createObjectStore("profile", { keyPath: "id" });
-        profile.createIndex("by_id", "id", { unique: true });
+      const tx = req.transaction;
 
-        const weight = db.createObjectStore("weightLog", { keyPath: "id", autoIncrement: true });
-        weight.createIndex("by_loggedAt", "loggedAt");
-
-        const exercises = db.createObjectStore("exercises", { keyPath: "id", autoIncrement: true });
-        exercises.createIndex("by_name", "name", { unique: true });
-
-        const sessions = db.createObjectStore("sessions", { keyPath: "id", autoIncrement: true });
-        sessions.createIndex("by_startedAt", "startedAt");
-        sessions.createIndex("by_exerciseId", "exerciseId");
-
-        const sets = db.createObjectStore("sets", { keyPath: "id", autoIncrement: true });
-        sets.createIndex("by_sessionId", "sessionId");
-        sets.createIndex("by_exercise_completedAt", ["exerciseId", "completedAt"]);
+      function ensureStore(name, opts, indexes = []) {
+        const store = db.objectStoreNames.contains(name)
+          ? tx.objectStore(name)
+          : db.createObjectStore(name, opts);
+        for (const [iname, keyPath, ixOpts] of indexes) {
+          if (!store.indexNames.contains(iname)) {
+            store.createIndex(iname, keyPath, ixOpts || {});
+          }
+        }
       }
+
+      ensureStore("profile",   { keyPath: "id" }, [
+        ["by_id", "id", { unique: true }]
+      ]);
+      ensureStore("weightLog", { keyPath: "id", autoIncrement: true }, [
+        ["by_loggedAt", "loggedAt"]
+      ]);
+      ensureStore("exercises", { keyPath: "id", autoIncrement: true }, [
+        ["by_name", "name", { unique: true }]
+      ]);
+      ensureStore("sessions",  { keyPath: "id", autoIncrement: true }, [
+        ["by_startedAt", "startedAt"],
+        ["by_exerciseId", "exerciseId"]   // legacy on pre-v0.10 sessions
+      ]);
+      ensureStore("sets",      { keyPath: "id", autoIncrement: true }, [
+        ["by_sessionId", "sessionId"],
+        ["by_exercise_completedAt", ["exerciseId", "completedAt"]]
+      ]);
     };
     req.onsuccess = () => { _db = req.result; resolve(_db); };
     req.onerror = () => reject(req.error);

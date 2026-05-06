@@ -78,7 +78,7 @@ export async function ProfileView(_params, root) {
   const backupCard = h("div", { class: "card stack" }, [
     eyebrow("Backup"),
     h("p", { class: "body-s", style: "color: var(--ink-mute)" },
-      "Storage is local. Export periodically — clearing site data will wipe your history."),
+      "Backup includes profile, weight log, sessions, and sets. Exercise definitions are managed by the app and aren't part of the backup."),
     h("div", { class: "grid-2" }, [
       h("button", { class: "btn btn-ghost", onclick: doExport }, "Export JSON"),
       h("label", { class: "btn btn-ghost", style: "cursor:pointer" }, [
