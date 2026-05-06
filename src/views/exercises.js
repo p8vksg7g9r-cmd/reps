@@ -66,6 +66,12 @@ export async function ExercisesView(_params, root) {
         if (isCardio) {
           // Cardio always goes through manual entry — no timer mode.
           location.hash = `#/quicklog/${ex.id}`;
+        } else if (ex.setType === "no_timer") {
+          // No-Timer exercises skip the With/Without-Timer chooser entirely.
+          // If the rest rule is firing, surface that with a single-button
+          // confirm so the user still sees the warning before starting.
+          if (rest.resting) openNoTimerWarn(ex, rest);
+          else location.hash = `#/quicklog/${ex.id}`;
         } else {
           openChooser(ex, rest);
         }
@@ -134,5 +140,22 @@ export async function ExercisesView(_params, root) {
       } }, "Without Timer"),
       h("button", { class: "btn btn-ghost btn-block", onclick: () => m.close() }, "Cancel")
     ].filter(Boolean));
+  }
+
+  /** Single-button rest-warning modal used for No-Timer exercises (since they
+   *  bypass the With/Without-Timer chooser but still need to surface the
+   *  7-day rule when applicable). */
+  function openNoTimerWarn(ex, rest) {
+    const m = modal([
+      eyebrow(`Rest warning · ${rest.daysLeft}d`),
+      h("h2", { class: "display-m" }, ex.name),
+      h("p", { class: "body-s", style: "color: var(--ink-mute)" },
+        "The 7-day rule says this exercise should rest. You can train it anyway."),
+      h("button", { class: "btn btn-primary btn-block btn-lg", onclick: () => {
+        m.close();
+        location.hash = `#/quicklog/${ex.id}`;
+      } }, "Train anyway"),
+      h("button", { class: "btn btn-ghost btn-block", onclick: () => m.close() }, "Cancel")
+    ]);
   }
 }

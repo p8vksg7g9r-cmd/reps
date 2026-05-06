@@ -8,11 +8,14 @@ const FIXED_ROUNDS = {
   continuous:       null,     // single block
   six_ten:          6,
   ninety_bilateral: 2,
+  no_timer:         null,     // user adds set rows ad hoc
   cardio_swim:      null,
   cardio_bike:      null
 };
 
 const CARDIO_TYPES = new Set(["cardio_swim", "cardio_bike"]);
+// Set types where the rounds field is meaningful enough to display in the modal.
+const TYPES_WITH_ROUNDS_FIELD = new Set(["standard", "bilateral", "continuous", "six_ten", "ninety_bilateral"]);
 
 export async function ManageExercisesView(_params, root) {
   const exercises = await listExercises();
@@ -111,7 +114,8 @@ export async function ManageExercisesView(_params, root) {
         h("option", { value: "bilateral",        selected: v.setType === "bilateral" },        "Bilateral"),
         h("option", { value: "continuous",       selected: v.setType === "continuous" },       "10/10"),
         h("option", { value: "six_ten",          selected: v.setType === "six_ten" },          "6/10"),
-        h("option", { value: "ninety_bilateral", selected: v.setType === "ninety_bilateral" }, "90 Bilateral")
+        h("option", { value: "ninety_bilateral", selected: v.setType === "ninety_bilateral" }, "90 Bilateral"),
+        h("option", { value: "no_timer",         selected: v.setType === "no_timer" },         "No Timer")
       ]),
       h("optgroup", { label: "Cardio" }, [
         h("option", { value: "cardio_swim", selected: v.setType === "cardio_swim" }, "Swimming"),
@@ -127,6 +131,9 @@ export async function ManageExercisesView(_params, root) {
       else if (v.rounds == null) v.rounds = 3;
       roundsInput.value = v.rounds != null ? String(v.rounds) : "";
       roundsInput.disabled = v.setType !== "standard";
+      // Hide the rounds field entirely for types where it doesn't apply
+      // (no_timer / cardio) instead of just disabling it.
+      roundsField.style.display = TYPES_WITH_ROUNDS_FIELD.has(v.setType) ? "" : "none";
       // Hide weight + bodyweight controls when the type is cardio.
       strengthOnly.style.display = isCardio ? "none" : "";
       if (isCardio) {
@@ -138,6 +145,8 @@ export async function ManageExercisesView(_params, root) {
     const roundsInput = h("input", { type: "number", value: String(v.rounds ?? 3), min: "1" });
     roundsInput.disabled = v.setType !== "standard";
     roundsInput.addEventListener("change", () => v.rounds = Number(roundsInput.value) || 3);
+    const roundsField = field("Rounds (standard only)", roundsInput);
+    if (!TYPES_WITH_ROUNDS_FIELD.has(v.setType)) roundsField.style.display = "none";
 
     const weightInput = h("input", { type: "number", value: String(v.workingWeight ?? 0), min: "0", step: "0.5" });
     weightInput.disabled = v.bodyweight;
@@ -168,7 +177,7 @@ export async function ManageExercisesView(_params, root) {
       h("h2", { class: "display-m" }, title),
       field("Name", nameInput),
       field("Set type", typeSel),
-      field("Rounds (standard only)", roundsInput),
+      roundsField,
       strengthOnly,
       h("div", { class: "row", style: "margin-top: 16px" }, [
         h("button", { class: "btn btn-ghost", onclick: () => m.close() }, "Cancel"),

@@ -2,7 +2,6 @@ import {
   getExercise, getOrCreateOpenSession, recordSet, updateExercise
 } from "../db/repo.js";
 import { h, eyebrow, stepper, field, badge } from "../ui/components.js";
-import { isCardioSetType } from "../domain/volume.js";
 
 /**
  * /quicklog/:exerciseId — manual entry without the timer.
@@ -28,6 +27,7 @@ export async function QuickLogView(params, root) {
 
   if (ex.setType === "cardio_swim") return renderSwim({ ex, root });
   if (ex.setType === "cardio_bike") return renderBike({ ex, root });
+  if (ex.setType === "no_timer")    return renderNoTimer({ ex, root });
   return renderStrength({ ex, root });
 }
 
@@ -128,6 +128,102 @@ function renderStrength({ ex, root }) {
 
   root.appendChild(weightFieldEl);
   root.appendChild(h("div", { style: "height:16px" }));
+  root.appendChild(eyebrow("Sets"));
+  root.appendChild(h("div", { style: "height:8px" }));
+  root.appendChild(setsContainer);
+  root.appendChild(h("div", { style: "height:8px" }));
+  root.appendChild(addBtn);
+  root.appendChild(h("div", { style: "height:24px" }));
+  root.appendChild(error.el);
+  root.appendChild(h("div", { class: "stack-sm" }, [saveBtn, cancelBtn]));
+}
+
+/* ============================== NO TIMER ==========================
+ * Per-set weight + reps. Each Add Set appends a fresh row. The first row's
+ * weight is pre-populated from the exercise's stored workingWeight (if any),
+ * but every row is independently editable, so the user can stagger weights
+ * across sets. Bodyweight exercises hide the per-set weight stepper. */
+
+function renderNoTimer({ ex, root }) {
+  root.appendChild(pageHead("No Timer · per-set entry", ex.name));
+
+  if (ex.bodyweight) {
+    root.appendChild(h("div", { class: "card card-tight body-s row", style: "justify-content:center; gap:8px" }, [
+      badge("Bodyweight", "badge-brass"),
+      h("span", { style: "color: var(--ink-mute)" }, "no external load")
+    ]));
+    root.appendChild(h("div", { style: "height:16px" }));
+  }
+
+  const setsContainer = h("div", { class: "stack" });
+  const rows = [];
+
+  function addRow() {
+    const round = rows.length + 1;
+    // Pre-populate the first row's weight from the exercise's last working
+    // weight; subsequent rows start blank so the user can taper or push.
+    const initialWeight = ex.bodyweight
+      ? 0
+      : (round === 1 && ex.workingWeight > 0 ? ex.workingWeight : null);
+
+    const weightStp = ex.bodyweight ? null : stepper({
+      value: initialWeight != null ? String(initialWeight) : "",
+      step: 0.5,
+      placeholder: "—",
+      onChange: () => {}
+    });
+    const repsStp = stepper({
+      value: "",
+      step: 1,
+      placeholder: "—",
+      onChange: () => {}
+    });
+
+    const card = h("div", { class: "edit-set" }, [
+      h("div", { class: "row-label" }, `Set ${round}`),
+      ...(weightStp ? [field("Weight (kg)", weightStp)] : []),
+      field("Reps", repsStp)
+    ]);
+    rows.push({ round, weightStp, repsStp });
+    setsContainer.appendChild(card);
+  }
+  addRow();
+
+  const addBtn = h("button", { class: "btn btn-ghost btn-block", onclick: addRow }, "+ Add set");
+  const error = makeError();
+  const saveBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Save exercise");
+  const cancelBtn = h("a", { class: "btn btn-ghost btn-block", href: "#/exercises" }, "Cancel");
+
+  saveBtn.addEventListener("click", async () => {
+    const valid = [];
+    for (const row of rows) {
+      let weight = 0;
+      if (!ex.bodyweight) {
+        const w = readNumber(row.weightStp);
+        if (w == null || !(w > 0)) { error.show(`Set ${row.round}: enter a weight > 0.`); return; }
+        weight = w;
+      }
+      const reps = readNumber(row.repsStp);
+      if (reps == null || reps < 1) { error.show(`Set ${row.round}: enter at least 1 rep.`); return; }
+      valid.push({ round: row.round, weight, reps });
+    }
+    error.hide();
+
+    const open = await getOrCreateOpenSession();
+    let lastWeight = null;
+    for (const v of valid) {
+      await recordSet({
+        sessionId: open.id, exerciseId: ex.id, round: v.round,
+        weight: v.weight, reps: v.reps, setType: "no_timer"
+      });
+      if (v.weight > 0) lastWeight = v.weight;
+    }
+    if (!ex.bodyweight && lastWeight != null) {
+      await updateExercise(ex.id, { workingWeight: lastWeight });
+    }
+    location.hash = "#/exercises";
+  });
+
   root.appendChild(eyebrow("Sets"));
   root.appendChild(h("div", { style: "height:8px" }));
   root.appendChild(setsContainer);

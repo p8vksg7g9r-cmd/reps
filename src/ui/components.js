@@ -189,6 +189,7 @@ export function setTypeName(setType) {
     case "continuous":       return "10/10";
     case "six_ten":          return "6/10";
     case "ninety_bilateral": return "90 Bilateral";
+    case "no_timer":         return "No Timer";
     case "cardio_swim":      return "Swimming";
     case "cardio_bike":      return "Stationary Bike";
     default: return setType || "Set";
@@ -202,6 +203,7 @@ export function setTypeStructure(ex) {
     case "continuous":       return `10/10 · 10 min block`;
     case "six_ten":          return `6/10 · 6 sets`;
     case "ninety_bilateral": return `90 Bilateral · 2 × 90s`;
+    case "no_timer":         return `No Timer · per-set entry`;
     case "cardio_swim":      return "Cardio · Swimming";
     case "cardio_bike":      return "Cardio · Stationary Bike";
     default: return setTypeName(ex?.setType);
