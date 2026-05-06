@@ -51,11 +51,10 @@ export async function ExercisesView(_params, root) {
 
     const row = h("a", {
       class: `ex-row${rest.resting ? " resting" : ""}`,
-      href: rest.resting ? "#" : `#/session/new/${ex.id}`,
+      href: "#",
       onclick: (e) => {
-        if (!rest.resting) return;
         e.preventDefault();
-        confirmOverride(ex, rest);
+        openChooser(ex, rest);
       }
     }, [
       h("div", { class: "meta" }, [
@@ -76,15 +75,34 @@ export async function ExercisesView(_params, root) {
   root.appendChild(h("p", { class: "eyebrow", style: "text-align:center; margin-top:24px" },
     "Tap Manage to add or edit exercises"));
 
-  function confirmOverride(ex, rest) {
+  /**
+   * Two-mode chooser: With Timer (the existing structured session) or
+   * Without Timer (the new manual quick-log flow). If the exercise is
+   * still under the 7-day rest rule, surface that as a soft warning at
+   * the top of the modal but still allow either path.
+   */
+  function openChooser(ex, rest) {
+    const restWarn = rest.resting
+      ? h("div", { class: "card card-tight", style: "background: rgba(217,122,79,0.14); color:#a85a36" }, [
+          h("strong", {}, `${rest.daysLeft}d rest left`),
+          h("div", { class: "body-s", style: "margin-top:2px" },
+            "The 7-day rule says this exercise should rest. You can train it anyway.")
+        ])
+      : null;
+
     const m = modal([
-      h("div", { class: "eyebrow" }, "Soft warning"),
-      h("h2", { class: "display-m" }, `${ex.name} — ${rest.daysLeft}d rest left`),
-      h("p", { class: "body" }, "The 7-day rule says this exercise should rest. You can override and train it anyway."),
-      h("div", { class: "row" }, [
-        h("button", { class: "btn btn-ghost", onclick: () => m.close() }, "Cancel"),
-        h("button", { class: "btn btn-primary", onclick: () => { m.close(); location.hash = `#/session/new/${ex.id}`; } }, "Train anyway")
-      ])
-    ]);
+      eyebrow("Pick a mode"),
+      h("h2", { class: "display-m" }, ex.name),
+      restWarn,
+      h("button", { class: "btn btn-primary btn-block btn-lg", onclick: () => {
+        m.close();
+        location.hash = `#/session/new/${ex.id}`;
+      } }, "With Timer"),
+      h("button", { class: "btn btn-ghost btn-block btn-lg", onclick: () => {
+        m.close();
+        location.hash = `#/quicklog/${ex.id}`;
+      } }, "Without Timer"),
+      h("button", { class: "btn btn-ghost btn-block", onclick: () => m.close() }, "Cancel")
+    ].filter(Boolean));
   }
 }

@@ -153,6 +153,17 @@ export function fmtDay(ms) {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 }
 
+/* ---------- environment ---------- */
+
+/** True when the page is running as an installed PWA (iOS standalone or
+ *  Android display-mode standalone). False when it's just a Safari tab. */
+export function isStandalonePWA() {
+  if (typeof window === "undefined") return false;
+  if (window.navigator && window.navigator.standalone === true) return true;
+  if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) return true;
+  return false;
+}
+
 /* ---------- inline SVG icons ---------- */
 // Returned as DOM nodes parsed from a string so the SVG element graph is real
 // (not just innerHTML on the parent button), keeping the layout & color flow

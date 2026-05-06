@@ -12,15 +12,13 @@ import { ProfileView } from "./views/profile.js";
 import { ManageExercisesView } from "./views/manage-exercises.js";
 import { SessionSummaryView } from "./views/session-summary.js";
 import { EditExerciseView } from "./views/edit-exercise.js";
+import { QuickLogView } from "./views/quicklog.js";
 
-// Bumped on every shipped change so the user can verify on the Profile screen
-// which build is actually running on their device.
-export const APP_VERSION = "v0.13";
+export const APP_VERSION = "v0.14";
 
 async function boot() {
-  // Best-effort portrait lock. Unsupported on iOS Safari (the API is missing
-  // entirely there) and only works in fullscreen mode on most Android
-  // browsers, so we just swallow rejections.
+  // Best-effort portrait lock. Unsupported on iOS Safari (no API at all);
+  // requires fullscreen on most Android browsers. Swallow rejections.
   try {
     if (screen.orientation && typeof screen.orientation.lock === "function") {
       screen.orientation.lock("portrait").catch(() => {});
@@ -33,13 +31,18 @@ async function boot() {
   registerRoute("/exercises", ExercisesView);
   registerRoute("/exercise/:id", ExerciseDetailView);
   registerRoute("/session/new/:exerciseId", SessionView);
+  registerRoute("/quicklog/:exerciseId", QuickLogView);
   registerRoute("/history", HistoryView);
   registerRoute("/profile", ProfileView);
   registerRoute("/manage-exercises", ManageExercisesView);
   registerRoute("/summary/:sessionId", SessionSummaryView);
   registerRoute("/edit-exercise/:sessionId/:exerciseId", EditExerciseView);
 
-  mount(document.getElementById("view"));
+  mount(
+    document.getElementById("view"),
+    document.getElementById("session-view"),
+    document.getElementById("active-bar")
+  );
   start();
 
   if ("serviceWorker" in navigator) {

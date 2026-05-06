@@ -70,6 +70,11 @@ export async function SessionView(params, root) {
   const openSess = await getOpenSession();
   const lastAvg = await computeLastAvg(exerciseId, openSess?.id);
 
+  // Inform the router so the persistent active-bar can show the right name.
+  window.dispatchEvent(new CustomEvent("session:setname", {
+    detail: { exerciseId: ex.id, name: ex.name }
+  }));
+
   const head = h("div", { class: "page-head" }, [
     eyebrow(setTypeStructure(ex)),
     h("h1", { class: "display-l" }, ex.name)
@@ -269,6 +274,7 @@ function makeEndOfExerciseButtons({ getSessionId, onPersist }) {
   startNew.addEventListener("click", async () => {
     await onPersist?.();
     releaseWakeLock();
+    window.dispatchEvent(new CustomEvent("session:teardown"));
     location.hash = "#/exercises";
   });
   endSess.addEventListener("click", async () => {
@@ -276,6 +282,7 @@ function makeEndOfExerciseButtons({ getSessionId, onPersist }) {
     const sid = getSessionId();
     if (sid != null) await endSession(sid);
     releaseWakeLock();
+    window.dispatchEvent(new CustomEvent("session:teardown"));
     location.hash = `#/summary/${sid}`;
   });
   wrap.appendChild(startNew);

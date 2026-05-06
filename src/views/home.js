@@ -1,7 +1,7 @@
 import { allSessions, listExercises, latestWeight, getOpenSession, endSession } from "../db/repo.js";
 import { weeklySummary } from "../domain/week.js";
 import { setVolume } from "../domain/volume.js";
-import { h, eyebrow, stat, fmtVolume, fmtDelta } from "../ui/components.js";
+import { h, eyebrow, stat, fmtVolume, fmtDelta, isStandalonePWA } from "../ui/components.js";
 import { tx, reqAsPromise } from "../db/schema.js";
 
 async function allSets() {
@@ -138,6 +138,21 @@ export async function HomeView(_params, root) {
   ]) : null;
 
   root.appendChild(head);
+
+  // Safari warning — shown only when the page is NOT running as an installed
+  // PWA. Data stored in plain Safari is in a different storage scope from the
+  // installed home-screen app, so the user could end up with two separate
+  // datasets without realising it.
+  if (!isStandalonePWA()) {
+    root.appendChild(h("div", { class: "card", style: "background: var(--amber); color: var(--navy-deep)" }, [
+      h("div", { class: "eyebrow", style: "color: var(--navy-deep); opacity: 0.75" }, "Add to Home Screen"),
+      h("p", { class: "body", style: "margin: 6px 0 0; font-weight: 600" },
+        "For best experience and to preserve your data, add this app to your home screen."),
+      h("p", { class: "body-s", style: "margin: 4px 0 0" },
+        "Data stored in Safari browser is separate from the home-screen app.")
+    ]));
+  }
+
   if (topBanner) root.appendChild(topBanner);
   root.appendChild(h("div", { class: "stack" }, [grid, volStat, loadStat, cta]));
   if (recentSection) {

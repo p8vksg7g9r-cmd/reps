@@ -256,6 +256,29 @@
 .mgr-row .sub { font-family: var(--font-mono); font-size: 11px; color: var(--ink-mute); }
 .mgr-row .actions { display: flex; gap: var(--s2); flex-wrap: wrap; align-items: center; }
 
+/* Persistent "Resume" bar shown on every non-session screen while an
+ * exercise screen is mounted in the background. */
+.active-bar {
+  position: fixed;
+  top: var(--safe-top);
+  left: 0; right: 0;
+  background: var(--terracotta);
+  color: var(--paper);
+  padding: 12px 16px;
+  text-align: center;
+  font-family: var(--font-eyebrow);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  z-index: 90;
+  text-decoration: none;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.active-bar:active { background: #c66a3f; }
+.active-bar.hidden { display: none !important; }
+body.has-active-bar { padding-top: calc(var(--safe-top) + 44px); }
+
 /* Total exercise time remaining — sits directly below the timer ring */
 .total-remaining {
   text-align: center;
