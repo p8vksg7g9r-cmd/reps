@@ -1,19 +1,9 @@
-import { allSessions, listExercises, latestWeight, getOpenSession, endSession } from "../db/repo.js";
+import { allSessions, allSets, listExercises, latestWeight, getOpenSession, endSession } from "../db/repo.js";
 import { weeklySummary } from "../domain/week.js";
 import { setVolume } from "../domain/volume.js";
-import { h, eyebrow, stat, fmtVolume, fmtDelta, isStandalonePWA } from "../ui/components.js";
-import { tx, reqAsPromise } from "../db/schema.js";
-
-async function allSets() {
-  const t = await tx(["sets"]);
-  return reqAsPromise(t.objectStore("sets").getAll());
-}
+import { h, eyebrow, stat, fmtVolume, fmtDelta, isStandalonePWA, openSessionBanner } from "../ui/components.js";
 
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
-
-function fmtTime(ms) {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 export async function HomeView(_params, root) {
   const [sessions, sets, exercises, lastWeight, openSession] = await Promise.all([
@@ -28,27 +18,11 @@ export async function HomeView(_params, root) {
     h("h1", { class: "display-l" }, "REPS")
   ]);
 
-  // Open-session banner — takes precedence over the weight reminder.
+  // Open-session banner takes precedence over the weight reminder.
   let topBanner = null;
   if (openSession) {
     const sessionSets = sets.filter((s) => s.sessionId === openSession.id && s.reps != null);
-    const exCount = new Set(sessionSets.map((s) => s.exerciseId)).size;
-    topBanner = h("div", { class: "card stack-sm", style: "background: var(--brass); color: var(--navy-deep)" }, [
-      h("div", { class: "row-between" }, [
-        h("div", {}, [
-          h("div", { class: "eyebrow", style: "color: var(--navy-deep); opacity:0.75" }, "Session in progress"),
-          h("div", { class: "mono", style: "font-weight:600" },
-            `Started ${fmtTime(openSession.startedAt)} · ${exCount} exercise${exCount === 1 ? "" : "s"}`)
-        ])
-      ]),
-      h("div", { class: "row" }, [
-        h("a", { href: "#/exercises", class: "btn btn-block", style: "background: var(--navy-deep); color: var(--paper); flex: 1" }, "Continue"),
-        h("button", { class: "btn btn-ghost btn-block", style: "flex: 1; border-color: var(--navy-deep); color: var(--navy-deep)", onclick: async () => {
-          await endSession(openSession.id);
-          location.hash = `#/summary/${openSession.id}`;
-        } }, "End session")
-      ])
-    ]);
+    topBanner = openSessionBanner({ openSession, sessionSets, variant: "home", endSession });
   } else if (!lastWeight) {
     topBanner = h("div", { class: "banner" }, [
       h("span", {}, "Log your first weight"),
@@ -144,8 +118,8 @@ export async function HomeView(_params, root) {
   // installed home-screen app, so the user could end up with two separate
   // datasets without realising it.
   if (!isStandalonePWA()) {
-    root.appendChild(h("div", { class: "card", style: "background: var(--amber); color: var(--navy-deep)" }, [
-      h("div", { class: "eyebrow", style: "color: var(--navy-deep); opacity: 0.75" }, "Add to Home Screen"),
+    root.appendChild(h("div", { class: "card card-amber" }, [
+      h("div", { class: "eyebrow" }, "Add to Home Screen"),
       h("p", { class: "body", style: "margin: 6px 0 0; font-weight: 600" },
         "For best experience and to preserve your data, add this app to your home screen."),
       h("p", { class: "body-s", style: "margin: 4px 0 0" },

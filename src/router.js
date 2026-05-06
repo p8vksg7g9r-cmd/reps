@@ -52,11 +52,6 @@ function match(pattern, path) {
   return params;
 }
 
-export async function go(hash) {
-  if (location.hash !== hash) { location.hash = hash; return; }
-  await render();
-}
-
 function isSessionPath(path) {
   return path.startsWith("/session/new/");
 }

@@ -1,22 +1,7 @@
 import { getSession, setsForSession, getExercise } from "../db/repo.js";
 import { setVolume, isCardioSetType } from "../domain/volume.js";
-import { h, eyebrow, fmtDay, fmtVolume, cardioMetricsLine } from "../ui/components.js";
+import { h, eyebrow, fmtDay, fmtTime, fmtDuration, fmtVolume, cardioMetricsLine } from "../ui/components.js";
 import { shareOrDownloadBackup } from "../ui/share.js";
-
-function fmtDuration(ms) {
-  if (!ms || ms < 0) return "—";
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
-function fmtTime(ms) {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 export async function SessionSummaryView(params, root) {
   const sessionId = Number(params.sessionId);

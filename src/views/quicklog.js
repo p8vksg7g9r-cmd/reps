@@ -1,7 +1,7 @@
 import {
   getExercise, getOrCreateOpenSession, recordSet, updateExercise
 } from "../db/repo.js";
-import { h, eyebrow, stepper, field, badge } from "../ui/components.js";
+import { h, eyebrow, stepper, field, badge, readStepperNumber } from "../ui/components.js";
 
 /**
  * /quicklog/:exerciseId — manual entry without the timer.
@@ -53,12 +53,7 @@ function makeError() {
   };
 }
 
-function readNumber(stepperEl) {
-  const input = stepperEl?.querySelector("input");
-  if (!input || input.value === "") return null;
-  const n = Number(input.value);
-  return Number.isFinite(n) ? n : null;
-}
+const readNumber = readStepperNumber;
 
 /* ============================== STRENGTH ============================== */
 
@@ -239,28 +234,25 @@ function renderNoTimer({ ex, root }) {
 function renderSwim({ ex, root }) {
   root.appendChild(pageHead("Cardio · Swimming", ex.name));
 
-  const distRef = { value: null };
-  const minRef  = { value: null };
-  const secRef  = { value: null };
-
-  const distStepper = stepper({ value: "", step: 50, placeholder: "—", onChange: (n) => { distRef.value = n; } });
-  const minStepper  = stepper({ value: "", step: 1,  placeholder: "—", onChange: (n) => { minRef.value = n; } });
-  const secStepper  = stepper({ value: "", step: 5,  placeholder: "—", onChange: (n) => { secRef.value = n; } });
+  const distStepper = stepper({ value: "", step: 50, placeholder: "—", onChange: () => {} });
+  const minStepper  = stepper({ value: "", step: 1,  placeholder: "—", onChange: () => {} });
+  const secStepper  = stepper({ value: "", step: 5,  placeholder: "—", onChange: () => {} });
 
   const error = makeError();
   const saveBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Save exercise");
   const cancelBtn = h("a", { class: "btn btn-ghost btn-block", href: "#/exercises" }, "Cancel");
 
   saveBtn.addEventListener("click", async () => {
-    const d = readNumber(distStepper);
-    const m = readNumber(minStepper);
-    const s = readNumber(secStepper) ?? 0;
+    const d  = readNumber(distStepper);
+    const mn = readNumber(minStepper);
+    const sc = readNumber(secStepper);
     if (d == null || !(d > 0)) { error.show("Enter the distance you swam."); return; }
-    if (m == null && s == null) { error.show("Enter how long you swam."); return; }
-    if ((m ?? 0) < 0 || s < 0 || s >= 60) { error.show("Time: minutes ≥ 0, seconds 0–59."); return; }
+    if (sc != null && (sc < 0 || sc >= 60)) { error.show("Seconds must be 0–59."); return; }
+    if (mn != null && mn < 0) { error.show("Minutes must be 0 or more."); return; }
+    const durationSec = (mn || 0) * 60 + (sc || 0);
+    if (!(durationSec > 0)) { error.show("Enter how long you swam."); return; }
     error.hide();
 
-    const durationSec = (Number(m) || 0) * 60 + Number(s);
     const open = await getOrCreateOpenSession();
     await recordSet({
       sessionId: open.id, exerciseId: ex.id, round: 1,
@@ -288,15 +280,10 @@ function renderSwim({ ex, root }) {
 function renderBike({ ex, root }) {
   root.appendChild(pageHead("Cardio · Stationary Bike", ex.name));
 
-  const minRef = { value: null };
-  const metRef = { value: null };
-  const wRef   = { value: null };
-  const hrRef  = { value: null };
-
-  const minStepper = stepper({ value: "", step: 1, placeholder: "—", onChange: (n) => { minRef.value = n; } });
-  const metStepper = stepper({ value: "", step: 1, placeholder: "optional", onChange: (n) => { metRef.value = n; } });
-  const wStepper   = stepper({ value: "", step: 5, placeholder: "optional", onChange: (n) => { wRef.value = n; } });
-  const hrStepper  = stepper({ value: "", step: 1, placeholder: "optional", onChange: (n) => { hrRef.value = n; } });
+  const minStepper = stepper({ value: "", step: 1, placeholder: "—",        onChange: () => {} });
+  const metStepper = stepper({ value: "", step: 1, placeholder: "optional", onChange: () => {} });
+  const wStepper   = stepper({ value: "", step: 5, placeholder: "optional", onChange: () => {} });
+  const hrStepper  = stepper({ value: "", step: 1, placeholder: "optional", onChange: () => {} });
 
   const error = makeError();
   const saveBtn = h("button", { class: "btn btn-primary btn-block btn-lg" }, "Save exercise");

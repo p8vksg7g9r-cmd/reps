@@ -1,11 +1,6 @@
-import { listExercises, lastSessionForExercise, getOpenSession, endSession } from "../db/repo.js";
+import { listExercises, lastSessionForExercise, getOpenSession, endSession, allSets } from "../db/repo.js";
 import { restState } from "../domain/rest-rule.js";
-import { tx, reqAsPromise } from "../db/schema.js";
-import { h, eyebrow, badge, modal, fmtKg, setTypeStructure } from "../ui/components.js";
-
-function fmtTime(ms) {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+import { h, eyebrow, badge, modal, fmtKg, setTypeStructure, openSessionBanner } from "../ui/components.js";
 
 export async function ExercisesView(_params, root) {
   const [exercises, openSession] = await Promise.all([listExercises(), getOpenSession()]);
@@ -23,25 +18,12 @@ export async function ExercisesView(_params, root) {
     h("a", { class: "btn btn-ghost btn-sm", href: "#/manage-exercises" }, "Manage")
   ]);
 
-  // Open-session banner with End-session escape hatch
+  // Open-session banner with End-session escape hatch.
   let openBanner = null;
   if (openSession) {
-    const t = await tx(["sets"]);
-    const setsAll = await reqAsPromise(t.objectStore("sets").getAll());
+    const setsAll = await allSets();
     const sessionSets = setsAll.filter((s) => s.sessionId === openSession.id && s.reps != null);
-    const exCount = new Set(sessionSets.map((s) => s.exerciseId)).size;
-    openBanner = h("div", { class: "card stack-sm", style: "background: var(--brass); color: var(--navy-deep); margin-bottom: 16px" }, [
-      h("div", {}, [
-        h("div", { class: "eyebrow", style: "color: var(--navy-deep); opacity:0.75" }, "Session in progress"),
-        h("div", { class: "mono", style: "font-weight:600" },
-          `Started ${fmtTime(openSession.startedAt)} · ${exCount} exercise${exCount === 1 ? "" : "s"} done`)
-      ]),
-      h("button", { class: "btn btn-block", style: "background: var(--navy-deep); color: var(--paper)", onclick: async () => {
-        if (!confirm("End this session now?")) return;
-        await endSession(openSession.id);
-        location.hash = `#/summary/${openSession.id}`;
-      } }, "End session")
-    ]);
+    openBanner = openSessionBanner({ openSession, sessionSets, variant: "exercises", endSession });
   }
 
   function buildRow({ ex, lastAt }) {

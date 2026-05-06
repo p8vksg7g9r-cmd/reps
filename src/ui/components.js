@@ -153,6 +153,48 @@ export function fmtDay(ms) {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 }
 
+/* ---------- shared callout components ---------- */
+
+/**
+ * Brass "Session in progress" banner used on Home and Exercises. Showing the
+ * same banner from one place keeps the wording, controls, and copy in sync.
+ *
+ * Variants:
+ *   "home"      — Continue + End-session buttons side by side
+ *   "exercises" — single full-width End-session button (with confirm)
+ */
+export function openSessionBanner({ openSession, sessionSets, variant = "home", endSession }) {
+  const exCount = new Set(sessionSets.map((s) => s.exerciseId)).size;
+  const startedLabel = `Started ${fmtTime(openSession.startedAt)} · ${exCount} exercise${exCount === 1 ? "" : "s"}${variant === "exercises" ? " done" : ""}`;
+
+  const meta = h("div", {}, [
+    h("div", { class: "eyebrow" }, "Session in progress"),
+    h("div", { class: "mono", style: "font-weight:600" }, startedLabel)
+  ]);
+
+  if (variant === "home") {
+    return h("div", { class: "card card-brass stack-sm" }, [
+      meta,
+      h("div", { class: "row" }, [
+        h("a", { href: "#/exercises", class: "btn btn-fill btn-block" }, "Continue"),
+        h("button", { class: "btn btn-outline btn-block", onclick: async () => {
+          await endSession(openSession.id);
+          location.hash = `#/summary/${openSession.id}`;
+        } }, "End session")
+      ])
+    ]);
+  }
+  // exercises variant
+  return h("div", { class: "card card-brass stack-sm", style: "margin-bottom: 16px" }, [
+    meta,
+    h("button", { class: "btn btn-fill btn-block", onclick: async () => {
+      if (!confirm("End this session now?")) return;
+      await endSession(openSession.id);
+      location.hash = `#/summary/${openSession.id}`;
+    } }, "End session")
+  ]);
+}
+
 /* ---------- environment ---------- */
 
 /** True when the page is running as an installed PWA (iOS standalone or
@@ -245,6 +287,31 @@ export function cardioMetricsLine(set) {
     return parts.length ? parts.join(" · ") : "—";
   }
   return "—";
+}
+
+/** Format a Date as a clock time, e.g. "14:30". */
+export function fmtTime(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Format a duration in milliseconds as "1h 5m" / "5m 12s" / "12s". */
+export function fmtDuration(ms) {
+  if (!ms || ms < 0) return "—";
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+/** Read a number from a stepper element, or null if the input is blank. */
+export function readStepperNumber(stepperEl) {
+  const input = stepperEl?.querySelector("input");
+  if (!input || input.value === "") return null;
+  const n = Number(input.value);
+  return Number.isFinite(n) ? n : null;
 }
 
 export function fmtAge(dobMs) {

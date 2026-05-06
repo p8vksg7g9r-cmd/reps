@@ -57,11 +57,6 @@ export async function getExercise(id) {
   return reqAsPromise(t.objectStore("exercises").get(id));
 }
 
-export async function getExerciseByName(name) {
-  const t = await tx(["exercises"]);
-  return reqAsPromise(t.objectStore("exercises").index("by_name").get(name));
-}
-
 export async function addExercise(ex) {
   const t = await tx(["exercises"], "readwrite");
   const id = await reqAsPromise(t.objectStore("exercises").add({
@@ -221,15 +216,14 @@ export async function setsForExercise(exerciseId) {
   return reqAsPromise(t.objectStore("sets").index("by_exercise_completedAt").getAll(range));
 }
 
-export async function listSessionsBetween(startMs, endMs) {
-  const t = await tx(["sessions"]);
-  const range = IDBKeyRange.bound(startMs, endMs);
-  return reqAsPromise(t.objectStore("sessions").index("by_startedAt").getAll(range));
-}
-
 export async function allSessions() {
   const t = await tx(["sessions"]);
   return reqAsPromise(t.objectStore("sessions").getAll());
+}
+
+export async function allSets() {
+  const t = await tx(["sets"]);
+  return reqAsPromise(t.objectStore("sets").getAll());
 }
 
 /**

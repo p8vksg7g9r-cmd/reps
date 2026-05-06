@@ -279,6 +279,25 @@
 .active-bar.hidden { display: none !important; }
 body.has-active-bar { padding-top: calc(var(--safe-top) + 44px); }
 
+/* Brass card: warm callout on home / exercises (open-session banner). */
+.card-brass { background: var(--brass); color: var(--navy-deep); }
+.card-brass .eyebrow { color: var(--navy-deep); opacity: 0.75; }
+.card-brass .btn-fill {
+  background: var(--navy-deep);
+  color: var(--paper);
+  flex: 1;
+}
+.card-brass .btn-outline {
+  background: transparent;
+  border: 1.5px solid var(--navy-deep);
+  color: var(--navy-deep);
+  flex: 1;
+}
+
+/* Amber card: gentle warning on home (Safari, weight reminder). */
+.card-amber { background: var(--amber); color: var(--navy-deep); }
+.card-amber .eyebrow { color: var(--navy-deep); opacity: 0.75; }
+
 /* Total exercise time remaining — sits directly below the timer ring */
 .total-remaining {
   text-align: center;

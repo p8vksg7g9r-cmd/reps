@@ -2,7 +2,7 @@ import {
   getExercise, getOpenSession, getOrCreateOpenSession, endSession,
   recordSet, updateSet, setsForSession, lastSessionForExercise, updateExercise
 } from "../db/repo.js";
-import { h, eyebrow, stepper, field, modal, setTypeStructure } from "../ui/components.js";
+import { h, eyebrow, stepper, field, modal, setTypeStructure, readStepperNumber } from "../ui/components.js";
 import {
   makeIntervalEngine, standardPhases, bilateralPhases, continuousPhases, ninetyBilateralPhases,
   renderTimerRing, unlockAudio
@@ -61,6 +61,14 @@ export async function SessionView(params, root) {
   const ex = await getExercise(exerciseId);
   if (!ex) {
     root.appendChild(h("p", {}, "Exercise not found."));
+    return;
+  }
+
+  // Cardio and no-timer exercises don't have a structured timer — redirect
+  // to the manual entry route. This guards against deep links / hand-typed
+  // URLs landing in the wrong renderer.
+  if (ex.category === "cardio" || ex.setType === "no_timer") {
+    location.hash = `#/quicklog/${ex.id}`;
     return;
   }
 
@@ -218,21 +226,18 @@ function promptMissingReps(missing, { setType }) {
   });
 }
 
-/** Lock a stepper element + tag its field label so it's unmistakably read-only. */
-function lockStepper(stepperEl) {
-  if (!stepperEl) return;
-  stepperEl.classList.add("locked");
-  stepperEl.querySelectorAll("button").forEach((b) => { b.disabled = true; b.tabIndex = -1; });
-  const input = stepperEl.querySelector("input");
-  if (input) { input.disabled = true; input.tabIndex = -1; input.setAttribute("aria-readonly", "true"); }
-}
-
+/** Mark a weight field unmistakably read-only: dim the stepper, disable its
+ *  buttons + input, and append a "LOCKED" tag to the label. */
 function lockField(fieldEl, stepperEl) {
-  lockStepper(stepperEl);
+  if (stepperEl) {
+    stepperEl.classList.add("locked");
+    stepperEl.querySelectorAll("button").forEach((b) => { b.disabled = true; b.tabIndex = -1; });
+    const input = stepperEl.querySelector("input");
+    if (input) { input.disabled = true; input.tabIndex = -1; input.setAttribute("aria-readonly", "true"); }
+  }
   const labelEl = fieldEl?.querySelector(".label");
   if (labelEl && !labelEl.querySelector(".lock-tag")) {
-    const tag = h("span", { class: "lock-tag" }, "LOCKED");
-    labelEl.appendChild(tag);
+    labelEl.appendChild(h("span", { class: "lock-tag" }, "LOCKED"));
   }
 }
 
@@ -252,12 +257,8 @@ function makeStartError() {
 /** Read the current weight from both the bound state and the live input element
  *  (the bound state may be stale if the user typed without blurring). */
 function currentWeightValue(stateRef, stepperEl) {
-  const inputEl = stepperEl?.querySelector("input");
-  if (inputEl && inputEl.value !== "") {
-    const parsed = Number(inputEl.value);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-  return stateRef.value;
+  const live = readStepperNumber(stepperEl);
+  return live != null ? live : stateRef.value;
 }
 
 /**
@@ -312,7 +313,6 @@ function renderStandard({ ex, lastAvg, root }) {
   // history, workingWeight is 0/undefined and the field shows blank.
   const initialWeight = ex.bodyweight ? 0 : (ex.workingWeight > 0 ? ex.workingWeight : null);
   const weight = { value: initialWeight };
-  const setIds = new Map();
 
   const indicator = makeSetIndicator(`Set 1 of ${totalSets} · ready`, lastAvg);
   const weightStepper = ex.bodyweight ? null : stepper({
@@ -376,7 +376,6 @@ function renderStandard({ ex, lastAvg, root }) {
         sessionId, exerciseId: ex.id, round,
         weight: weight.value, reps: null, setType: ex.setType
       });
-      setIds.set(round, setId);
 
       if (phase.kind === "rest") {
         indicator.set(`Set ${round} done · Set ${round + 1} of ${totalSets} next`);
@@ -408,7 +407,6 @@ function renderStandard({ ex, lastAvg, root }) {
         sessionId, exerciseId: ex.id, round,
         weight: weight.value, reps: null, setType: ex.setType
       });
-      setIds.set(round, setId);
     }
     skipBtn.classList.add("hidden");
     ring.setPhase("DONE", 0);
@@ -460,7 +458,6 @@ function renderBilateral({ ex, lastAvg, root }) {
   let sessionId = null;
   const initialWeight = ex.bodyweight ? 0 : (ex.workingWeight > 0 ? ex.workingWeight : null);
   const weight = { value: initialWeight };
-  const setIds = new Map();
 
   const indicator = makeSetIndicator("Round 1 of 3 · ready", lastAvg);
   const weightStepper = ex.bodyweight ? null : stepper({
@@ -522,7 +519,6 @@ function renderBilateral({ ex, lastAvg, root }) {
         sessionId, exerciseId: ex.id, round,
         weight: weight.value, reps: null, setType: "bilateral"
       });
-      setIds.set(round, setId);
       if (phase.kind === "rest") {
         indicator.set(`Round ${round} done · Round ${round + 1} of 3 next`);
         repsPanel.showPrompt({
@@ -554,7 +550,6 @@ function renderBilateral({ ex, lastAvg, root }) {
         sessionId, exerciseId: ex.id, round,
         weight: weight.value, reps: null, setType: "bilateral"
       });
-      setIds.set(round, setId);
     }
     skipBtn.classList.add("hidden");
     ring.setPhase("DONE", 0);

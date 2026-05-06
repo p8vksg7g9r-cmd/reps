@@ -100,10 +100,6 @@ export function exerciseEndBeep() {
   beep({ freq: 1100, duration: 0.40, volume: 0.95, type: "triangle", when: 0.48 });
 }
 
-// Backward-compat aliases.
-export function chimeBeep() { workStartBeep(); }
-export function endChime()  { exerciseEndBeep(); }
-
 function transitionBeep(phase) {
   if (!phase) return;
   if (phase.kind === "work")       workStartBeep();
@@ -232,7 +228,6 @@ export function renderTimerRing(initial = 60) {
       ring.setAttribute("stroke-dashoffset", "0");
       if (label === "REST") ring.setAttribute("stroke", "var(--brass)");
       else if (label === "GET READY") ring.setAttribute("stroke", "var(--amber)");
-      else if (label === "LEFT" || label === "RIGHT") ring.setAttribute("stroke", "var(--terracotta)");
       else ring.setAttribute("stroke", "var(--terracotta)");
     },
     setRemaining(remaining) {

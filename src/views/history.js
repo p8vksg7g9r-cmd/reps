@@ -1,24 +1,13 @@
-import { allSessions, listExercises, deleteExerciseFromSession } from "../db/repo.js";
-import { tx, reqAsPromise } from "../db/schema.js";
+import { allSessions, allSets, listExercises, deleteExerciseFromSession } from "../db/repo.js";
 import { groupSessionsByDay, startOfIsoWeek, startOfMonth } from "../domain/week.js";
-import { setVolume } from "../domain/volume.js";
-import { h, eyebrow, fmtVolume, fmtDay, iconPencil, iconTrash, cardioMetricsLine } from "../ui/components.js";
-import { isCardioSetType } from "../domain/volume.js";
-
-async function allSets() {
-  const t = await tx(["sets"]);
-  return reqAsPromise(t.objectStore("sets").getAll());
-}
+import { setVolume, isCardioSetType } from "../domain/volume.js";
+import { h, eyebrow, fmtVolume, fmtDay, fmtTime, iconPencil, iconTrash, cardioMetricsLine } from "../ui/components.js";
 
 const TABS = [
   { id: "week",  label: "Week" },
   { id: "month", label: "Month" },
   { id: "all",   label: "All" }
 ];
-
-function fmtTime(ms) {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 export async function HistoryView(_params, root) {
   let activeTab = "week";

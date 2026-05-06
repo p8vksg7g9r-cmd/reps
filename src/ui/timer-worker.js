@@ -12,13 +12,11 @@
 //   { type: "start" }            begin from phase 0
 //   { type: "skip" }             advance to next phase immediately
 //   { type: "stop" }             halt
-//   { type: "getState" }         request a one-shot state message
 //
 // Protocol — worker → main:
 //   { type: "phase", phaseIdx, remaining }   on entry to a new phase
 //   { type: "tick",  phaseIdx, remaining }   every full second of phase change
 //   { type: "done" }                         all phases complete
-//   { type: "state", running, phaseIdx, remaining }  reply to getState
 
 let phases = [];
 let phaseIdx = 0;
@@ -57,10 +55,6 @@ self.onmessage = (e) => {
     case "stop":
       stopInterval();
       running = false;
-      break;
-
-    case "getState":
-      replyState();
       break;
   }
 };
@@ -118,15 +112,6 @@ function advance() {
   phaseStartedAt = Date.now();
   lastPostedRemaining = phases[phaseIdx].seconds;
   post({ type: "phase", phaseIdx, remaining: phases[phaseIdx].seconds });
-}
-
-function replyState() {
-  if (!running) { post({ type: "state", running: false }); return; }
-  const phase = phases[phaseIdx];
-  if (!phase) { post({ type: "state", running: false }); return; }
-  const elapsed = Date.now() - phaseStartedAt;
-  const remaining = Math.max(0, Math.ceil((phase.seconds * 1000 - elapsed) / 1000));
-  post({ type: "state", running: true, phaseIdx, remaining });
 }
 
 function post(m) { self.postMessage(m); }

@@ -105,7 +105,7 @@ export async function ProfileView(_params, root) {
   async function doImport(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!confirm("Importing replaces ALL local data. Continue?")) return;
+    if (!confirm("Import will replace your profile, weight log, sessions, and sets with the file's contents. Exercise definitions are not affected. Continue?")) return;
     try {
       const data = JSON.parse(await file.text());
       await importAll(data, { wipe: true });
