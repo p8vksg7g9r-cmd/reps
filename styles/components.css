@@ -272,11 +272,6 @@
 }
 .np-submit:active { background: #c66a3f; }
 
-/* Tighter sizing on the active-session screen so the keypad fits the
- * phone viewport alongside the timer ring without scrolling. */
-.session-page .numpad-display { height: 48px; font-size: 24px; }
-.session-page .np-key { height: 52px; font-size: 20px; }
-
 /* Bodyweight pill toggle, used in Exercise Manager and edit modals */
 .toggle-bw {
   display: inline-flex;

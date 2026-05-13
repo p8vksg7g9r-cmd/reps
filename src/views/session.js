@@ -190,45 +190,73 @@ function makeCompletedLog({ unitLabel = "Set" } = {}) {
   return { el: card, upsert };
 }
 
-/** Reps prompt panel. Starts BLANK each time it's shown — no pre-fill.
- *  After save, the panel just collapses silently — the saved set is already
- *  visible in the completed-sets log above, so a 'Set N saved' card here
- *  would be redundant. */
+/** Reps prompt panel. The numpad is shown as a bottom-sheet modal so it pops
+ *  over whatever scroll position the session screen is at — previously the
+ *  inline panel could land below the fold on later sets. showPrompt returns
+ *  a Promise that resolves when the modal closes (save or system dismiss),
+ *  letting the final-set caller await before falling through to the
+ *  missing-reps modal. */
 function makeRepsPanel({ setType }) {
   const root = h("div", { class: "hidden" });
+  let activeModal = null;
+
+  function closeActive() {
+    if (activeModal) {
+      activeModal.close();
+      activeModal = null;
+    }
+  }
 
   function clear() {
+    closeActive();
     root.classList.add("hidden");
     root.innerHTML = "";
   }
 
   function showPrompt({ round, hint, onSave }) {
-    root.classList.remove("hidden");
+    closeActive();
+    root.classList.add("hidden");
     root.innerHTML = "";
     const label = setType === "bilateral" ? `Round ${round} — reps per side` : `Set ${round} — reps`;
 
-    let saving = false;
-    const np = repsNumpad({
-      submitLabel: `Save set ${round}`,
-      onSubmit: async (value) => {
-        if (saving) return;
-        if (value == null || !Number.isFinite(value) || value < 1) {
-          alert("Enter the number of reps you completed.");
-          return;
+    return new Promise((resolve) => {
+      let saving = false;
+      const np = repsNumpad({
+        submitLabel: "Save",
+        onSubmit: async (value) => {
+          if (saving) return;
+          if (value == null || !Number.isFinite(value) || value < 1) {
+            alert("Enter the number of reps you completed.");
+            return;
+          }
+          saving = true;
+          try { await onSave(value); }
+          finally {
+            const m = activeModal;
+            activeModal = null;
+            m?.close();
+            resolve();
+          }
         }
-        saving = true;
-        await onSave(value);
-        clear();
-      }
-    });
+      });
 
-    root.appendChild(h("div", { class: "card stack-sm" }, [
-      eyebrow(hint),
-      field(label, np.el)
-    ]));
+      activeModal = modal([
+        eyebrow(hint),
+        field(label, np.el)
+      ], {
+        onClose: () => {
+          // Backdrop-tap dismissed without saving, or the system closed us
+          // because the next phase started. Either way the set ends up in
+          // the end-of-exercise missing-reps modal.
+          if (activeModal) activeModal = null;
+          resolve();
+        }
+      });
+    });
   }
 
   function showText(text) {
+    closeActive();
     root.classList.remove("hidden");
     root.innerHTML = "";
     root.appendChild(h("div", { class: "card card-tight body-s", style: "color: var(--ink-mute); text-align:center" }, text));
@@ -552,10 +580,10 @@ function renderStandard({ ex, lastRef, root, collapseHead }) {
 
   engine.onDone(async () => {
     const last = phases[phases.length - 1];
+    let lastSetId = null;
     if (last?.kind === "work") {
-      const round = last.round;
-      const setId = await recordSet({
-        sessionId, exerciseId: ex.id, round,
+      lastSetId = await recordSet({
+        sessionId, exerciseId: ex.id, round: last.round,
         weight: weight.value, reps: null, setType: ex.setType
       });
     }
@@ -563,6 +591,21 @@ function renderStandard({ ex, lastRef, root, collapseHead }) {
     ring.setPhase("DONE", 0);
     totalRemaining.set(0);
     indicator.set("Exercise complete");
+
+    // The final set has no rest phase after it, so the rest-driven numpad
+    // never fires for it. Prompt for reps now so the user gets the same
+    // numpad UX as every other set, instead of falling straight into the
+    // multi-set missing-reps stepper modal.
+    if (lastSetId) {
+      await repsPanel.showPrompt({
+        round: last.round,
+        hint: `Set ${last.round} done — log the reps`,
+        onSave: async (reps) => {
+          await updateSet(lastSetId, { reps });
+          completed.upsert(last.round, reps);
+        }
+      });
+    }
 
     // Filter to this exercise's sets only — sessions are now multi-exercise.
     const all = (await setsForSession(sessionId)).filter((s) => s.exerciseId === ex.id);
@@ -702,10 +745,10 @@ function renderBilateral({ ex, lastRef, root, collapseHead }) {
 
   engine.onDone(async () => {
     const last = phases[phases.length - 1];
+    let lastSetId = null;
     if (last?.kind === "work" && last.side === "R") {
-      const round = last.round;
-      const setId = await recordSet({
-        sessionId, exerciseId: ex.id, round,
+      lastSetId = await recordSet({
+        sessionId, exerciseId: ex.id, round: last.round,
         weight: weight.value, reps: null, setType: "bilateral"
       });
     }
@@ -713,6 +756,20 @@ function renderBilateral({ ex, lastRef, root, collapseHead }) {
     ring.setPhase("DONE", 0);
     totalRemaining.set(0);
     indicator.set("Exercise complete");
+
+    // Final round has no trailing rest — prompt numpad inline so the user
+    // logs reps the same way they did for rounds 1–2 instead of being
+    // dropped into the missing-reps stepper modal.
+    if (lastSetId) {
+      await repsPanel.showPrompt({
+        round: last.round,
+        hint: `Round ${last.round} done — log reps per side`,
+        onSave: async (reps) => {
+          await updateSet(lastSetId, { reps });
+          completed.upsert(last.round, reps);
+        }
+      });
+    }
 
     const all = (await setsForSession(sessionId)).filter((s) => s.exerciseId === ex.id);
     const missing = all.filter((s) => s.reps == null).sort((a, b) => a.round - b.round);
