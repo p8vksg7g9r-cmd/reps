@@ -228,16 +228,30 @@ function makeRepsPanel({ setType }) {
       saveBtn
     ]));
 
-    // Auto-focus the reps input so the numeric keyboard opens immediately.
-    // Mobile browsers may block programmatic focus that isn't tied to a user
-    // gesture, but the rest-phase transition is the most recent action on
-    // screen — a rAF + click() pair is the most reliable nudge we have.
+    // Open the numeric keyboard the instant the prompt appears. Two passes:
+    //   1. Synchronous focus+click right after the input mounts. The phase
+    //      callback arrives via a worker postMessage so we're already outside
+    //      any user-gesture task; deferring further (rAF/setTimeout) only
+    //      widens the gap iOS uses to decide whether to honor focus().
+    //   2. Fallback: if iOS blocked pass 1, the very next tap anywhere on the
+    //      page re-tries focus+click. That tap IS a user gesture, so the
+    //      keyboard opens without the user having to aim at the field.
     const input = stp.querySelector("input");
     if (input) {
-      requestAnimationFrame(() => {
-        try { input.focus({ preventScroll: false }); } catch { input.focus(); }
-        try { input.click(); } catch {}
-      });
+      try { input.focus({ preventScroll: false }); } catch { input.focus(); }
+      try { input.click(); } catch {}
+
+      if (document.activeElement !== input) {
+        const retry = () => {
+          if (!input.isConnected || document.activeElement === input) return;
+          try { input.focus({ preventScroll: false }); } catch { input.focus(); }
+          try { input.click(); } catch {}
+        };
+        document.addEventListener("pointerdown", retry, { once: true, capture: true });
+        input.addEventListener("focus", () => {
+          document.removeEventListener("pointerdown", retry, { capture: true });
+        }, { once: true });
+      }
     }
   }
 
