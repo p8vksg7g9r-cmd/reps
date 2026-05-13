@@ -115,6 +115,73 @@ export function field(label, control) {
   return h("label", { class: "field" }, [h("span", { class: "label" }, label), control]);
 }
 
+/**
+ * In-page numeric keypad. Used by the reps prompt during a rest phase so the
+ * field is ready to log without any tap — phase events arrive via a worker
+ * postMessage outside any user-gesture task, and iOS WebKit refuses to open
+ * the OS soft keyboard for focus() calls in that context. A pure DOM keypad
+ * sidesteps that restriction entirely.
+ *
+ * Keys: 1–9 in a 3-col grid, then a final row of ⌫ / 0 / Save.
+ * pointerdown handlers preventDefault to suppress the iOS focus ring +
+ * double-tap zoom shimmer, and to fire on press rather than waiting for
+ * pointerup → click (which adds ~300ms perceptual lag on some browsers).
+ */
+export function repsNumpad({ value = "", maxDigits = 3, submitLabel = "Save", onChange, onSubmit }) {
+  let buf = value == null ? "" : String(value);
+
+  const display = h("div", { class: "numpad-display" });
+  function render() {
+    display.textContent = buf || "—";
+    display.classList.toggle("empty", !buf);
+  }
+  render();
+
+  function appendDigit(d) {
+    if (buf.length >= maxDigits) return;
+    if (buf === "0") buf = d;
+    else buf += d;
+    render();
+    onChange?.(Number(buf));
+  }
+  function backspace() {
+    if (!buf) return;
+    buf = buf.slice(0, -1);
+    render();
+    onChange?.(buf ? Number(buf) : null);
+  }
+  function submit() {
+    onSubmit?.(buf ? Number(buf) : null);
+  }
+
+  function makeKey(label, kind, handler) {
+    const b = h("button", { type: "button", class: `np-key np-${kind}` }, label);
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      handler();
+    });
+    b.addEventListener("contextmenu", (e) => e.preventDefault());
+    return b;
+  }
+  const digit = (d) => makeKey(String(d), "digit", () => appendDigit(String(d)));
+
+  const grid = h("div", { class: "numpad-grid" }, [
+    digit(1), digit(2), digit(3),
+    digit(4), digit(5), digit(6),
+    digit(7), digit(8), digit(9),
+    makeKey("⌫", "back", backspace),
+    digit(0),
+    makeKey(submitLabel, "submit", submit)
+  ]);
+
+  const root = h("div", { class: "numpad" }, [display, grid]);
+  return {
+    el: root,
+    getValue() { return buf ? Number(buf) : null; },
+    setValue(v) { buf = v == null ? "" : String(v); render(); }
+  };
+}
+
 export function fmtKg(n) {
   if (n == null || Number.isNaN(n)) return "—";
   const r = Math.round(n * 10) / 10;

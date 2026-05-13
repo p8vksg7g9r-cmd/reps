@@ -215,6 +215,68 @@
   letter-spacing: 0.16em;
 }
 
+/* In-page reps numpad. Bypasses the iOS soft keyboard entirely so the reps
+ * prompt is immediately tappable when the rest phase begins — no focus()
+ * gymnastics required. */
+.numpad {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.numpad-display {
+  height: 56px;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 500;
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  letter-spacing: -0.01em;
+}
+.numpad-display.empty { color: var(--ink-mute); font-weight: 400; }
+
+.numpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s2);
+}
+.np-key {
+  height: 56px;
+  border-radius: var(--r-md);
+  background: var(--paper);
+  border: 1.5px solid var(--hairline);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--ink);
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  display: grid;
+  place-items: center;
+  transition: transform 0.06s ease, background 0.12s ease;
+}
+.np-key:active { background: rgba(15, 35, 64, 0.08); transform: scale(0.97); }
+.np-back { color: var(--ink-soft); font-size: 24px; }
+.np-submit {
+  background: var(--terracotta);
+  color: var(--paper);
+  border-color: var(--terracotta);
+  font-family: var(--font-eyebrow);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.np-submit:active { background: #c66a3f; }
+
+/* Tighter sizing on the active-session screen so the keypad fits the
+ * phone viewport alongside the timer ring without scrolling. */
+.session-page .numpad-display { height: 48px; font-size: 24px; }
+.session-page .np-key { height: 52px; font-size: 20px; }
+
 /* Bodyweight pill toggle, used in Exercise Manager and edit modals */
 .toggle-bw {
   display: inline-flex;

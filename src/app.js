@@ -14,7 +14,7 @@ import { SessionSummaryView } from "./views/session-summary.js";
 import { EditExerciseView } from "./views/edit-exercise.js";
 import { QuickLogView } from "./views/quicklog.js";
 
-export const APP_VERSION = "v0.22";
+export const APP_VERSION = "v0.23";
 
 // Best-effort portrait lock. Unsupported on iOS Safari (no API at all);
 // requires fullscreen on most Android browsers. Swallow rejections.

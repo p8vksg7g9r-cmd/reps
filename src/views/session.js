@@ -2,7 +2,7 @@ import {
   getExercise, getOpenSession, getOrCreateOpenSession, endSession,
   recordSet, updateSet, setsForSession, setsForExercise, lastSessionForExercise, updateExercise
 } from "../db/repo.js";
-import { h, eyebrow, stepper, field, modal, setTypeStructure, readStepperNumber, fmtKg, fmtVolume } from "../ui/components.js";
+import { h, eyebrow, stepper, field, modal, setTypeStructure, readStepperNumber, fmtKg, fmtVolume, repsNumpad } from "../ui/components.js";
 import { setVolume } from "../domain/volume.js";
 import {
   makeIntervalEngine, standardPhases, bilateralPhases, continuousPhases, ninetyBilateralPhases,
@@ -205,57 +205,27 @@ function makeRepsPanel({ setType }) {
   function showPrompt({ round, hint, onSave }) {
     root.classList.remove("hidden");
     root.innerHTML = "";
-    let value = null;
-    const stp = stepper({
-      value: "",                      // start blank
-      step: 1,
-      placeholder: "—",
-      onChange: (n) => { value = n; }
-    });
     const label = setType === "bilateral" ? `Round ${round} — reps per side` : `Set ${round} — reps`;
-    const saveBtn = h("button", { class: "btn btn-primary btn-block" }, `Save set ${round}`);
-    saveBtn.onclick = async () => {
-      if (value == null || !Number.isFinite(value) || value < 1) {
-        alert("Enter the number of reps you completed.");
-        return;
+
+    let saving = false;
+    const np = repsNumpad({
+      submitLabel: `Save set ${round}`,
+      onSubmit: async (value) => {
+        if (saving) return;
+        if (value == null || !Number.isFinite(value) || value < 1) {
+          alert("Enter the number of reps you completed.");
+          return;
+        }
+        saving = true;
+        await onSave(value);
+        clear();
       }
-      await onSave(value);
-      clear();
-    };
+    });
+
     root.appendChild(h("div", { class: "card stack-sm" }, [
       eyebrow(hint),
-      field(label, stp),
-      saveBtn
+      field(label, np.el)
     ]));
-
-    // Open the numeric keyboard the instant the prompt appears. Two passes:
-    //   1. Synchronous focus+click right after the input mounts. Phase events
-    //      arrive via a worker postMessage so we're already outside any
-    //      user-gesture task; deferring further (rAF/setTimeout) only widens
-    //      the gap iOS uses to decide whether to honor focus().
-    //   2. Fallback: the very next pointerdown anywhere on the page re-fires
-    //      focus+click. That event IS a user gesture, so iOS WebKit will
-    //      open the keyboard even if pass 1 was rejected. Installed
-    //      unconditionally — iOS may set document.activeElement from pass 1
-    //      without actually opening the keyboard, so we can't trust that
-    //      signal as proof that the keyboard is up.
-    const input = stp.querySelector("input");
-    if (input) {
-      try { input.focus({ preventScroll: false }); } catch { input.focus(); }
-      try { input.click(); } catch {}
-
-      const retry = (e) => {
-        if (!input.isConnected) return;
-        try { input.focus({ preventScroll: false }); } catch { input.focus(); }
-        // Don't synth-click if the user already tapped the input — the real
-        // touch handles keyboard opening, and a programmatic click could
-        // interfere with native selection / cursor placement.
-        if (e.target !== input) {
-          try { input.click(); } catch {}
-        }
-      };
-      document.addEventListener("pointerdown", retry, { once: true, capture: true });
-    }
   }
 
   function showText(text) {
