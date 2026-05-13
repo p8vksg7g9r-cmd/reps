@@ -457,6 +457,15 @@ body.has-active-bar { padding-top: calc(var(--safe-top) + 44px); }
   padding: var(--s5) 0 0;
 }
 
+/* Weekly training-load sparkline embedded inside a .stat card on Home. */
+.load-card .load-spark {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: var(--s2);
+}
+.load-card .delta { margin-top: var(--s2); }
+
 /* Completed-sets running log inside the active session view */
 .completed-log .row {
   font-family: var(--font-mono);

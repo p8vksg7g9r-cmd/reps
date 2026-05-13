@@ -1,5 +1,5 @@
 import { allSessions, allSets, listExercises, latestWeight, getOpenSession, endSession } from "../db/repo.js";
-import { weeklySummary, startOfIsoWeek } from "../domain/week.js";
+import { weeklySummary, startOfIsoWeek, aggregate } from "../domain/week.js";
 import { setVolume } from "../domain/volume.js";
 import {
   h, eyebrow, stat, fmtVolume, fmtDelta, fmtMeters, fmtMmSs, fmtHoursMinutes,
@@ -60,34 +60,13 @@ export async function HomeView(_params, root) {
     delta: delta.volume === 0 ? "no change" : fmtDelta(Math.round(delta.volume), " kg")
   });
 
-  // Training load = weekly volume / latest bodyweight, in kg/kg = bodyweight
-  // multiples. Trend uses the same bodyweight on both sides for consistency.
+  // Training load = weekly volume / latest bodyweight (bodyweight multiples).
+  // A constant latest-bw is applied to every week — the user's actual weight
+  // shifts week to week, but using one anchor keeps the curve a pure rescale
+  // of the volume series rather than mixing two signals.
   const bw = lastWeight?.kg && lastWeight.kg > 0 ? lastWeight.kg : null;
-  const ratio     = bw ? current.volume  / bw : null;
-  const ratioPrev = bw ? summary.previous.volume / bw : null;
-  const ratioDelta = (ratio != null && ratioPrev != null) ? ratio - ratioPrev : null;
-
-  const arrow =
-    ratioDelta == null ? "" :
-    ratioDelta >  0.5  ? "↑" :
-    ratioDelta < -0.5  ? "↓" :
-                          "→";
-  const deltaClass =
-    ratioDelta == null ? "delta" :
-    ratioDelta >  0.5  ? "delta up" :
-    ratioDelta < -0.5  ? "delta down" :
-                          "delta";
-  const deltaText =
-    bw == null         ? "Log a bodyweight to track this" :
-    ratioDelta == null ? "no prior week" :
-    ratioDelta === 0   ? `flat ${arrow} vs last week` :
-                         `${ratioDelta > 0 ? "+" : "−"}${Math.abs(Math.round(ratioDelta))}× ${arrow} vs last week`;
-
-  const loadStat = h("div", { class: "stat" }, [
-    h("div", { class: "label" }, "Training load · weekly"),
-    h("div", { class: "value mono" }, ratio == null ? "—" : `${Math.round(ratio)}× BW`),
-    h("div", { class: deltaClass }, deltaText)
-  ]);
+  const loadSeries = weeklyLoadSeries({ sessions, sets, bw, weeks: 8 });
+  const loadStat = buildLoadCard({ series: loadSeries, bw });
 
   const liftsSection = h("section", { class: "stack" }, [
     h("div", { class: "section-eyebrow" }, "Lifts · this week"),
@@ -164,6 +143,98 @@ export async function HomeView(_params, root) {
 }
 
 /* ----------------------------------------------------------------- */
+
+/**
+ * Eight weekly buckets ending with the current ISO week. Each entry is
+ *   { weekStart, volume, load }
+ * where load = volume / bw, or null when bw is missing. Oldest → newest so
+ * the sparkline reads left-to-right.
+ */
+function weeklyLoadSeries({ sessions, sets, bw, weeks }) {
+  const thisStart = startOfIsoWeek(Date.now());
+  const out = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const start = thisStart - i * WEEK_MS;
+    const agg = aggregate({ sessions, sets, start, end: start + WEEK_MS });
+    out.push({
+      weekStart: start,
+      volume: agg.volume,
+      load: bw ? agg.volume / bw : null
+    });
+  }
+  return out;
+}
+
+/** Stat-shaped card carrying the current week's load + an 8-week trend
+ *  sparkline. Falls back to text if there's no bodyweight on file or fewer
+ *  than two populated weeks to draw a meaningful curve. */
+function buildLoadCard({ series, bw }) {
+  const current = series[series.length - 1];
+  const prev = series[series.length - 2];
+  const headline = bw && current?.load != null ? `${Math.round(current.load)}× BW` : "—";
+
+  // Week-over-week arrow as a tiny anchor for the headline.
+  let arrow = "";
+  if (bw && current?.load != null && prev?.load != null) {
+    const diff = current.load - prev.load;
+    arrow = diff > 0.5 ? " ↑" : diff < -0.5 ? " ↓" : " →";
+  }
+
+  const children = [
+    h("div", { class: "label" }, "Training load · weekly"),
+    h("div", { class: "value mono" }, `${headline}${arrow}`)
+  ];
+
+  if (bw == null) {
+    children.push(h("div", { class: "delta" }, "Log a bodyweight to track this"));
+  } else {
+    const populated = series.filter((w) => w.volume > 0).length;
+    if (populated < 2) {
+      children.push(h("div", { class: "delta" }, "Trend appears after multiple training weeks"));
+    } else {
+      children.push(renderLoadSparkline(series));
+      children.push(h("div", { class: "delta" }, `${series.length}-week trend · this week on the right`));
+    }
+  }
+
+  return h("div", { class: "stat load-card" }, children);
+}
+
+/** Minimal SVG sparkline: filled area + line + emphasized last point.
+ *  preserveAspectRatio="xMidYMid meet" keeps the dot circular as the SVG
+ *  scales to the card width. */
+function renderLoadSparkline(series) {
+  const W = 320, H = 70, P_X = 6, P_TOP = 8, P_BOTTOM = 6;
+  const n = series.length;
+  const loads = series.map((w) => w.load || 0);
+  const lmax = Math.max(...loads, 1);
+  const xFor = (i) => P_X + (i * (W - 2 * P_X)) / Math.max(1, n - 1);
+  const yFor = (v) => P_TOP + (H - P_TOP - P_BOTTOM) * (1 - v / lmax);
+
+  const linePoints = series
+    .map((_, i) => `${xFor(i).toFixed(1)},${yFor(loads[i]).toFixed(1)}`)
+    .join(" ");
+  const areaPath = [
+    `M ${xFor(0).toFixed(1)} ${(H - P_BOTTOM).toFixed(1)}`,
+    ...series.map((_, i) => `L ${xFor(i).toFixed(1)} ${yFor(loads[i]).toFixed(1)}`),
+    `L ${xFor(n - 1).toFixed(1)} ${(H - P_BOTTOM).toFixed(1)}`,
+    "Z"
+  ].join(" ");
+
+  const lastX = xFor(n - 1);
+  const lastY = yFor(loads[n - 1]);
+
+  const svg = `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" class="load-spark" role="img" aria-label="Weekly training-load trend, last ${n} weeks">
+      <line x1="${P_X}" y1="${(H - P_BOTTOM).toFixed(1)}" x2="${(W - P_X).toFixed(1)}" y2="${(H - P_BOTTOM).toFixed(1)}" stroke="rgba(15,35,64,0.10)"/>
+      <path d="${areaPath}" fill="rgba(217,122,79,0.18)"/>
+      <polyline points="${linePoints}" fill="none" stroke="var(--terracotta)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="3.5" fill="var(--terracotta)"/>
+    </svg>`;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = svg.trim();
+  return wrap.firstElementChild;
+}
 
 function metricRow(label, value) {
   return h("div", { class: "row-between mono", style: "font-size: 14px; padding: 4px 0" }, [
