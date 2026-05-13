@@ -703,3 +703,16 @@ body.has-active-bar { padding-top: calc(var(--safe-top) + 44px); }
 }
 .trend-legend .dot-vol { background: var(--terracotta); }
 .trend-legend .dot-reps { background: var(--sage); }
+.trend-legend .dot-swim { background: var(--sage); }
+.trend-legend .dot-bike { background: var(--brass); }
+
+/* Cardio trend card on Home. The sparkline shares its sizing/spacing rules
+ * with the load-card sparkline above, scoped here so the chart and legend
+ * sit comfortably regardless of which series rendered. */
+.cardio-trend .cardio-spark {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: var(--s2);
+}
+.cardio-trend .trend-legend { margin-top: var(--s2); }

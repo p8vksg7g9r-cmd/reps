@@ -2,7 +2,7 @@ import { allSessions, allSets, listExercises, latestWeight, getOpenSession, endS
 import { weeklySummary, startOfIsoWeek, aggregate } from "../domain/week.js";
 import { setVolume } from "../domain/volume.js";
 import {
-  h, eyebrow, stat, fmtVolume, fmtDelta, fmtMeters, fmtMmSs, fmtHoursMinutes,
+  h, eyebrow, stat, fmtVolume, fmtDelta, fmtMeters, fmtHoursMinutes,
   isStandalonePWA, openSessionBanner
 } from "../ui/components.js";
 
@@ -75,19 +75,11 @@ export async function HomeView(_params, root) {
 
   /* ---------------- Cardio card (conditional) ---------------- */
 
-  // Sets in the current ISO week, with reps != null (real entries only).
-  const weekStart = summary.weekStart;
-  const weekEnd   = weekStart + WEEK_MS;
-  const weekSessionIds = new Set(
-    sessions.filter((s) => s.startedAt >= weekStart && s.startedAt < weekEnd).map((s) => s.id)
-  );
-  const weekSets = sets.filter((s) => weekSessionIds.has(s.sessionId) && s.reps != null);
-  const swimSets = weekSets.filter((s) => s.setType === "cardio_swim");
-  const bikeSets = weekSets.filter((s) => s.setType === "cardio_bike");
-
-  const cardioCard = (swimSets.length || bikeSets.length)
-    ? buildCardioCard(swimSets, bikeSets)
-    : null;
+  // Same 8-week window as the lifts load card. The card renders iff there's
+  // at least one cardio set somewhere in that window — a week off still keeps
+  // the trend visible so the user can see they've been off.
+  const cardioSeries = weeklyCardioSeries({ sessions, sets, weeks: 8 });
+  const cardioCard = buildCardioCard({ series: cardioSeries });
 
   /* ---------------- CTA + recent ---------------- */
 
@@ -236,45 +228,101 @@ function renderLoadSparkline(series) {
   return wrap.firstElementChild;
 }
 
-function metricRow(label, value) {
-  return h("div", { class: "row-between mono", style: "font-size: 14px; padding: 4px 0" }, [
-    h("span", { style: "color: var(--ink-mute)" }, label),
-    h("span", { style: "font-weight: 600" }, value)
-  ]);
+/**
+ * Per-week cardio totals over the last `weeks` ISO weeks. Each entry:
+ *   { weekStart, swimMeters, bikeSeconds }
+ * Returned oldest → newest so the resulting chart reads left to right.
+ */
+function weeklyCardioSeries({ sessions, sets, weeks }) {
+  const thisStart = startOfIsoWeek(Date.now());
+  const out = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const start = thisStart - i * WEEK_MS;
+    const end = start + WEEK_MS;
+    const sessionIds = new Set(
+      sessions.filter((s) => s.startedAt >= start && s.startedAt < end).map((s) => s.id)
+    );
+    const ws = sets.filter((s) => sessionIds.has(s.sessionId) && s.reps != null);
+    const swimMeters = ws
+      .filter((s) => s.setType === "cardio_swim")
+      .reduce((sum, s) => sum + (Number(s.metrics?.distanceM) || 0), 0);
+    const bikeSeconds = ws
+      .filter((s) => s.setType === "cardio_bike")
+      .reduce((sum, s) => sum + (Number(s.metrics?.durationSec) || 0), 0);
+    out.push({ weekStart: start, swimMeters, bikeSeconds });
+  }
+  return out;
 }
 
-function buildCardioCard(swimSets, bikeSets) {
-  const sections = [];
+/** Two-line sparkline of swim distance + bike time. Returns null when the
+ *  user has done no cardio in the 8-week window so the home layout drops
+ *  the card entirely instead of showing an empty placeholder. */
+function buildCardioCard({ series }) {
+  const haveSwim = series.some((w) => w.swimMeters > 0);
+  const haveBike = series.some((w) => w.bikeSeconds > 0);
+  if (!haveSwim && !haveBike) return null;
 
-  if (swimSets.length) {
-    const distanceM   = swimSets.reduce((sum, s) => sum + (Number(s.metrics?.distanceM)   || 0), 0);
-    const durationSec = swimSets.reduce((sum, s) => sum + (Number(s.metrics?.durationSec) || 0), 0);
-    // Pace per 1500 m = total swim time scaled to 1500 m. Only meaningful if
-    // there's any distance to divide by.
-    const pacePer1500Sec = distanceM > 0 ? (durationSec / distanceM) * 1500 : null;
+  const populatedWeeks = series.filter((w) => w.swimMeters > 0 || w.bikeSeconds > 0).length;
+  const current = series[series.length - 1];
 
-    sections.push(h("div", { class: "stack-sm" }, [
-      h("div", { class: "eyebrow" }, "Swimming"),
-      metricRow("Distance", fmtMeters(distanceM)),
-      pacePer1500Sec != null ? metricRow("Pace per 1500 m", fmtMmSs(pacePer1500Sec)) : null
-    ].filter(Boolean)));
+  const legend = h("div", { class: "trend-legend" }, [
+    haveSwim ? h("span", { class: "row" }, [
+      h("span", { class: "dot dot-swim" }),
+      h("span", { class: "mono" }, `Swim · ${fmtMeters(current.swimMeters)}`)
+    ]) : null,
+    haveBike ? h("span", { class: "row" }, [
+      h("span", { class: "dot dot-bike" }),
+      h("span", { class: "mono" }, `Bike · ${fmtHoursMinutes(current.bikeSeconds)}`)
+    ]) : null
+  ].filter(Boolean));
+
+  const children = [h("div", { class: "section-eyebrow" }, "Cardio · 8-week trend")];
+
+  if (populatedWeeks >= 2) {
+    children.push(renderCardioSparkline(series, { haveSwim, haveBike }));
+  } else {
+    children.push(h("p", {
+      class: "body-s",
+      style: "color: var(--ink-mute); text-align:center; margin: 8px 0"
+    }, "Trend appears after multiple weeks of cardio."));
   }
+  children.push(legend);
 
-  if (bikeSets.length) {
-    if (sections.length) sections.push(h("div", { class: "divider" }));
-    const durationSec = bikeSets.reduce((sum, s) => sum + (Number(s.metrics?.durationSec) || 0), 0);
-    const metMin      = bikeSets.reduce((sum, s) => sum + (Number(s.metrics?.metMin)      || 0), 0);
+  return h("div", { class: "card stack-sm cardio-trend" }, children);
+}
 
-    const rows = [
-      h("div", { class: "eyebrow" }, "Bike"),
-      metricRow("Total time", fmtHoursMinutes(durationSec))
-    ];
-    if (metMin > 0) rows.push(metricRow("MET·minutes", String(metMin)));
-    sections.push(h("div", { class: "stack-sm" }, rows));
-  }
+/** Each series gets its own y-scale so distance (meters) and duration
+ *  (seconds) both fill the height — the chart compares trend shape, not
+ *  absolute magnitude. */
+function renderCardioSparkline(series, { haveSwim, haveBike }) {
+  const W = 320, H = 90, P_X = 8, P_TOP = 10, P_BOTTOM = 8;
+  const n = series.length;
+  const swim = series.map((w) => w.swimMeters);
+  const bike = series.map((w) => w.bikeSeconds);
+  const sMax = Math.max(...swim, 1);
+  const bMax = Math.max(...bike, 1);
 
-  return h("div", { class: "card stack" }, [
-    h("div", { class: "section-eyebrow" }, "Cardio · this week"),
-    ...sections
-  ]);
+  const xFor = (i) => P_X + (i * (W - 2 * P_X)) / Math.max(1, n - 1);
+  const yFor = (v, max) => P_TOP + (H - P_TOP - P_BOTTOM) * (1 - v / max);
+
+  const pathFor = (vals, max) => vals
+    .map((v, i) => `${i === 0 ? "M" : "L"} ${xFor(i).toFixed(1)} ${yFor(v, max).toFixed(1)}`)
+    .join(" ");
+
+  const swimPath = haveSwim ? `<path d="${pathFor(swim, sMax)}" fill="none" stroke="var(--sage)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : "";
+  const bikePath = haveBike ? `<path d="${pathFor(bike, bMax)}" fill="none" stroke="var(--brass)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : "";
+  const swimDot = haveSwim ? `<circle cx="${xFor(n - 1).toFixed(1)}" cy="${yFor(swim[n - 1], sMax).toFixed(1)}" r="3.5" fill="var(--sage)"/>` : "";
+  const bikeDot = haveBike ? `<circle cx="${xFor(n - 1).toFixed(1)}" cy="${yFor(bike[n - 1], bMax).toFixed(1)}" r="3.5" fill="var(--brass)"/>` : "";
+
+  const svg = `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" class="cardio-spark" role="img" aria-label="Weekly cardio trend, last ${n} weeks">
+      <line x1="${P_X}" y1="${(H - P_BOTTOM).toFixed(1)}" x2="${(W - P_X).toFixed(1)}" y2="${(H - P_BOTTOM).toFixed(1)}" stroke="rgba(15,35,64,0.10)"/>
+      ${swimPath}
+      ${bikePath}
+      ${swimDot}
+      ${bikeDot}
+    </svg>`;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = svg.trim();
+  return wrap.firstElementChild;
 }
