@@ -14,7 +14,7 @@ import { SessionSummaryView } from "./views/session-summary.js";
 import { EditExerciseView } from "./views/edit-exercise.js";
 import { QuickLogView } from "./views/quicklog.js";
 
-export const APP_VERSION = "v0.27";
+export const APP_VERSION = "v0.28";
 
 // Best-effort portrait lock. Unsupported on iOS Safari (no API at all);
 // requires fullscreen on most Android browsers. Swallow rejections.
@@ -64,8 +64,45 @@ async function boot() {
   start();
 
   if ("serviceWorker" in navigator) {
-    try { await navigator.serviceWorker.register("./service-worker.js"); }
-    catch (err) { console.warn("SW registration failed", err); }
+    // iOS PWAs aggressively suspend and restore from snapshot, so a swipe-
+    // close + reopen often does NOT re-run boot and never picks up a new
+    // SW. Three nudges combined have made updates reliable enough not to
+    // need a delete-and-reinstall:
+    //
+    //   1. controllerchange listener BEFORE register. When a new SW
+    //      activates and claims the page, reload so the in-memory JS
+    //      (which the browser doesn't otherwise refresh) matches what
+    //      the SW now serves. Guarded so we don't reload on the very
+    //      first activation (initial install).
+    //
+    //   2. updateViaCache: "none" — forces the browser to bypass its
+    //      HTTP cache when fetching service-worker.js for update checks.
+    //      Github Pages defaults to a 10-min Cache-Control on the SW
+    //      file, which can mask a fresh deploy.
+    //
+    //   3. registration.update() on visibilitychange. The page becoming
+    //      visible is the only reliable signal we get on iOS that the
+    //      user is "back" — re-check for a new SW then.
+    let initialActivation = !navigator.serviceWorker.controller;
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (initialActivation) { initialActivation = false; return; }
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+
+    try {
+      const reg = await navigator.serviceWorker.register("./service-worker.js", { updateViaCache: "none" });
+      reg.update().catch(() => {});
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          reg.update().catch(() => {});
+        }
+      });
+    } catch (err) {
+      console.warn("SW registration failed", err);
+    }
   }
 }
 
