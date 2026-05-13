@@ -1,4 +1,4 @@
-import { allSessions, allSets, listExercises, deleteExerciseFromSession } from "../db/repo.js";
+import { allSessions, allSets, listExercises, deleteExerciseFromSession, deleteSession } from "../db/repo.js";
 import { groupSessionsByDay, startOfIsoWeek, startOfMonth } from "../domain/week.js";
 import { setVolume, isCardioSetType } from "../domain/volume.js";
 import { h, eyebrow, fmtVolume, fmtDay, fmtTime, iconPencil, iconTrash, cardioMetricsLine } from "../ui/components.js";
@@ -75,10 +75,27 @@ export async function HistoryView(_params, root) {
     const sessionVol = ssets.reduce((sum, x) => sum + setVolume(x), 0);
 
     const card = h("div", { class: "session-card" });
-    const header = h("a", { class: "row-between", href: `#/summary/${session.id}`, style: "display:flex" }, [
-      h("div", { style: "font-weight:600" }, `Session · ${fmtTime(session.startedAt)}`),
-      h("div", { class: "mono", style: "font-size:12px; color: var(--ink-mute)" },
-        `${orderedIds.length} ex${sessionVol > 0 ? ` · ${fmtVolume(sessionVol)}` : ""}`)
+    const delSession = h("button", { class: "icon-btn danger", "aria-label": "Delete this session",
+      onclick: async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const summary = orderedIds.length === 0
+          ? "Delete this empty session?"
+          : `Delete this entire session and all ${orderedIds.length} exercise${orderedIds.length === 1 ? "" : "s"}? This cannot be undone.`;
+        if (!confirm(summary)) return;
+        await deleteSession(session.id);
+        await loadAndRender();
+      }
+    }, [iconTrash()]);
+    // The link covers the title + meta; the trash button sits beside it so a
+    // tap on the button doesn't also navigate to the summary screen.
+    const header = h("div", { style: "display:flex; align-items:center; gap:8px" }, [
+      h("a", { href: `#/summary/${session.id}`, style: "flex:1; display:flex; justify-content:space-between; align-items:center; min-width:0" }, [
+        h("div", { style: "font-weight:600" }, `Session · ${fmtTime(session.startedAt)}`),
+        h("div", { class: "mono", style: "font-size:12px; color: var(--ink-mute)" },
+          `${orderedIds.length} ex${sessionVol > 0 ? ` · ${fmtVolume(sessionVol)}` : ""}`)
+      ]),
+      delSession
     ]);
     card.appendChild(header);
 

@@ -190,6 +190,30 @@ export async function setsForSessionExercise(sessionId, exerciseId) {
 }
 
 /**
+ * Delete a whole session: drops the session row and every set that
+ * references it. Used by History → per-session delete, primarily to clean
+ * out empty test/scratch sessions. No referential constraint to enforce
+ * elsewhere — exercises are session-independent, profile/weightLog don't
+ * reference sessions.
+ */
+export async function deleteSession(sessionId) {
+  const t = await tx(["sessions", "sets"], "readwrite");
+  const idx = t.objectStore("sets").index("by_sessionId");
+  await new Promise((resolve, reject) => {
+    const cur = idx.openCursor(IDBKeyRange.only(sessionId));
+    cur.onsuccess = (e) => {
+      const c = e.target.result;
+      if (!c) return resolve();
+      c.delete();
+      c.continue();
+    };
+    cur.onerror = () => reject(cur.error);
+  });
+  t.objectStore("sessions").delete(sessionId);
+  await txDone(t);
+}
+
+/**
  * Remove every set in the given session that belongs to the given exercise.
  * Used by History → per-exercise delete; the set rows are dropped, the
  * session itself stays (it may still contain other exercises).
