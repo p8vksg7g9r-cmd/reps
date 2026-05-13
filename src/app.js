@@ -14,16 +14,33 @@ import { SessionSummaryView } from "./views/session-summary.js";
 import { EditExerciseView } from "./views/edit-exercise.js";
 import { QuickLogView } from "./views/quicklog.js";
 
-export const APP_VERSION = "v0.19";
+export const APP_VERSION = "v0.20";
 
-async function boot() {
-  // Best-effort portrait lock. Unsupported on iOS Safari (no API at all);
-  // requires fullscreen on most Android browsers. Swallow rejections.
+// Best-effort portrait lock. Unsupported on iOS Safari (no API at all);
+// requires fullscreen on most Android browsers. Swallow rejections.
+// Re-attempted on orientation/visibility change so a rotation that slips
+// through (e.g. when the user briefly leaves fullscreen) gets snapped back.
+function tryLockPortrait() {
   try {
     if (screen.orientation && typeof screen.orientation.lock === "function") {
       screen.orientation.lock("portrait").catch(() => {});
     }
   } catch {}
+}
+
+async function boot() {
+  tryLockPortrait();
+  if (screen.orientation && typeof screen.orientation.addEventListener === "function") {
+    screen.orientation.addEventListener("change", () => {
+      if (screen.orientation.type && !screen.orientation.type.startsWith("portrait")) {
+        tryLockPortrait();
+      }
+    });
+  }
+  window.addEventListener("orientationchange", tryLockPortrait);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") tryLockPortrait();
+  });
 
   await seedIfEmpty(STARTER_EXERCISES);
   await seedCardioIfNeeded();

@@ -583,3 +583,57 @@ body.has-active-bar { padding-top: calc(var(--safe-top) + 44px); }
 /* Misc */
 .divider { height: 1px; background: var(--hairline); margin: var(--s4) 0; }
 .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* Active-session page — vertical layout tuned to fit a phone viewport without
+ * scrolling. Smaller timer ring, tighter gaps, collapsible page-head. The
+ * .session-gap utility replaces inline-height spacers so we can tune them
+ * here without touching the renderers. */
+.session-page { padding-top: var(--s3); padding-bottom: var(--s4); }
+.session-page .page-head { padding: var(--s2) 0 var(--s3); }
+.session-page .page-head .display-l {
+  font-size: 28px;
+  line-height: 1.05;
+}
+.session-page .timer {
+  width: 200px;
+  height: 200px;
+}
+.session-page .timer svg {
+  width: 200px;
+  height: 200px;
+}
+.session-page .timer .countdown { font-size: 44px; }
+.session-page .timer .phase { bottom: 20px; }
+.session-page .total-remaining { margin-top: 4px; margin-bottom: 4px; }
+.session-page .total-remaining .tr-value { font-size: 20px; }
+.session-page .card { padding: var(--s3) var(--s4); }
+.session-page .stepper { height: 48px; }
+.session-page .field > .label { margin-bottom: 4px; }
+.session-page > * + * { margin-top: var(--s2); }
+.session-gap { height: var(--s2); }
+
+/* Trend chart shown on exercise completion */
+.trend-card .trend-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 4px;
+}
+.trend-legend {
+  display: flex;
+  justify-content: center;
+  gap: var(--s4);
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 4px;
+}
+.trend-legend .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.trend-legend .dot-vol { background: var(--terracotta); }
+.trend-legend .dot-reps { background: var(--sage); }

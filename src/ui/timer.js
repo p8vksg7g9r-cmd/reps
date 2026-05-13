@@ -60,11 +60,6 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// Volume notes: amplitudes were quiet enough to disappear under music in
-// earbuds. Pushed close to unity gain on the loud cues, with a 5ms attack
-// ramp so the high amplitude doesn't click. Triangle waveform on the loud
-// cues has more harmonic content than sine and cuts through music better
-// without sounding harsh.
 function beep({ freq = 880, duration = 0.08, volume = 0.4, when = 0, type = "sine" } = {}) {
   const c = audioCtx;
   if (!c) return;
@@ -87,17 +82,20 @@ function beep({ freq = 880, duration = 0.08, volume = 0.4, when = 0, type = "sin
   osc.stop(t + duration + 0.02);
 }
 
-export function tickBeep()       { beep({ freq: 660,  duration: 0.06, volume: 0.40 }); }
-export function readyStartBeep() { beep({ freq: 520,  duration: 0.14, volume: 0.70, type: "triangle" }); }
+// Volumes are pushed to ~1.0 on the loud cues so beeps cut through music in
+// earbuds. The 5ms attack ramp keeps a unity-gain triangle from clicking, and
+// a single triangle/sine tone at gain=1.0 does not clip the destination stage.
+export function tickBeep()       { beep({ freq: 660,  duration: 0.06, volume: 0.55 }); }
+export function readyStartBeep() { beep({ freq: 520,  duration: 0.14, volume: 0.95, type: "triangle" }); }
 export function workStartBeep() {
-  beep({ freq: 880,  duration: 0.18, volume: 0.95, type: "triangle", when: 0.00 });
-  beep({ freq: 880,  duration: 0.18, volume: 0.95, type: "triangle", when: 0.22 });
+  beep({ freq: 880,  duration: 0.18, volume: 1.0, type: "triangle", when: 0.00 });
+  beep({ freq: 880,  duration: 0.18, volume: 1.0, type: "triangle", when: 0.22 });
 }
-export function restStartBeep()  { beep({ freq: 660,  duration: 0.22, volume: 0.85, type: "triangle" }); }
+export function restStartBeep()  { beep({ freq: 660,  duration: 0.22, volume: 1.0, type: "triangle" }); }
 export function exerciseEndBeep() {
-  beep({ freq: 660,  duration: 0.22, volume: 0.90, type: "triangle", when: 0.00 });
-  beep({ freq: 880,  duration: 0.22, volume: 0.90, type: "triangle", when: 0.24 });
-  beep({ freq: 1100, duration: 0.40, volume: 0.95, type: "triangle", when: 0.48 });
+  beep({ freq: 660,  duration: 0.22, volume: 1.0, type: "triangle", when: 0.00 });
+  beep({ freq: 880,  duration: 0.22, volume: 1.0, type: "triangle", when: 0.24 });
+  beep({ freq: 1100, duration: 0.40, volume: 1.0, type: "triangle", when: 0.48 });
 }
 
 function transitionBeep(phase) {
