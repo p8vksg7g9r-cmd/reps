@@ -705,6 +705,7 @@ body.has-active-bar { padding-top: calc(var(--safe-top) + 44px); }
 .trend-legend .dot-reps { background: var(--sage); }
 .trend-legend .dot-swim { background: var(--sage); }
 .trend-legend .dot-bike { background: var(--brass); }
+.trend-legend .dot-ef   { background: var(--terracotta); }
 
 /* Cardio trend card on Home. The sparkline shares its sizing/spacing rules
  * with the load-card sparkline above, scoped here so the chart and legend
@@ -716,3 +717,13 @@ body.has-active-bar { padding-top: calc(var(--safe-top) + 44px); }
   margin-top: var(--s2);
 }
 .cardio-trend .trend-legend { margin-top: var(--s2); }
+
+/* Bike Efficiency Factor card on Home. Bar chart, one bar per qualifying
+ * (45 min+) stationary-bike session over the last 16 weeks. */
+.ef-card .ef-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: var(--s2);
+}
+.ef-card .trend-legend { margin-top: var(--s2); }

@@ -81,6 +81,19 @@ export async function HomeView(_params, root) {
   const cardioSeries = weeklyCardioSeries({ sessions, sets, weeks: 8 });
   const cardioCard = buildCardioCard({ series: cardioSeries });
 
+  /* ---------------- Bike efficiency card (conditional) ---------------- */
+
+  // EF = avgPower / avgHR. One bar per qualifying bike session over the last
+  // 16 weeks. Sessions count only if the bike set(s) total at least 45 min —
+  // shorter sessions are usually warm-ups or test rides, not training, and
+  // their EF reads noisy.
+  const bikeEFCardSeries = bikeEFSeries({
+    sessions, sets,
+    minDurationSec: 45 * 60,
+    windowMs: 16 * WEEK_MS
+  });
+  const bikeEFCard = buildBikeEFCard({ series: bikeEFCardSeries });
+
   /* ---------------- CTA + recent ---------------- */
 
   const ctaLabel = openSession ? "Add an exercise to this session" : "Start a session";
@@ -125,6 +138,7 @@ export async function HomeView(_params, root) {
 
   const summaryStack = [liftsSection];
   if (cardioCard) summaryStack.push(cardioCard);
+  if (bikeEFCard) summaryStack.push(bikeEFCard);
   summaryStack.push(cta);
   root.appendChild(h("div", { class: "stack-lg" }, summaryStack));
 
@@ -252,6 +266,125 @@ function weeklyCardioSeries({ sessions, sets, weeks }) {
     out.push({ weekStart: start, swimMeters, bikeSeconds });
   }
   return out;
+}
+
+/**
+ * Per-session Efficiency Factor for stationary bike workouts that lasted at
+ * least `minDurationSec` (sum of bike set durations within the session).
+ * Returns oldest → newest within the given trailing window. Sets missing
+ * either avgPowerW or avgHrBpm are skipped — a session keeps qualifying as
+ * long as some set has both, plus enough total duration.
+ *
+ * Aggregation uses duration-weighted means so a hypothetical multi-set
+ * session aggregates honestly; the typical single-set case collapses to
+ * just that set's values.
+ */
+function bikeEFSeries({ sessions, sets, minDurationSec, windowMs }) {
+  const cutoff = Date.now() - windowMs;
+  const recentSessions = sessions
+    .filter((s) => s.startedAt >= cutoff)
+    .sort((a, b) => a.startedAt - b.startedAt);
+
+  const out = [];
+  for (const s of recentSessions) {
+    const bikeSets = sets.filter(
+      (x) => x.sessionId === s.id &&
+             x.setType === "cardio_bike" &&
+             x.reps != null &&
+             Number(x.metrics?.avgPowerW)   > 0 &&
+             Number(x.metrics?.avgHrBpm)    > 0 &&
+             Number(x.metrics?.durationSec) > 0
+    );
+    if (!bikeSets.length) continue;
+    const totalDur = bikeSets.reduce((sum, x) => sum + Number(x.metrics.durationSec), 0);
+    if (totalDur < minDurationSec) continue;
+    const wPower = bikeSets.reduce((sum, x) => sum + Number(x.metrics.avgPowerW) * Number(x.metrics.durationSec), 0) / totalDur;
+    const wHr    = bikeSets.reduce((sum, x) => sum + Number(x.metrics.avgHrBpm)  * Number(x.metrics.durationSec), 0) / totalDur;
+    if (!(wHr > 0)) continue;
+    out.push({
+      sessionId: s.id,
+      startedAt: s.startedAt,
+      ef: wPower / wHr,
+      durationSec: totalDur
+    });
+  }
+  return out;
+}
+
+/** Card wrapper for the EF bar chart. Hidden entirely if no qualifying
+ *  session exists in the window — keeps a brand-new user's Home tidy. */
+function buildBikeEFCard({ series }) {
+  if (!series.length) return null;
+  const latest = series[series.length - 1];
+  const prev = series.length >= 2 ? series[series.length - 2] : null;
+
+  let arrow = "";
+  if (prev) {
+    const diff = latest.ef - prev.ef;
+    arrow = diff > 0.02 ? " ↑" : diff < -0.02 ? " ↓" : " →";
+  }
+
+  const legend = h("div", { class: "trend-legend" }, [
+    h("span", { class: "row" }, [
+      h("span", { class: "dot dot-ef" }),
+      h("span", { class: "mono" }, `Latest EF · ${latest.ef.toFixed(2)} W/bpm${arrow}`)
+    ])
+  ]);
+
+  const children = [
+    h("div", { class: "section-eyebrow" }, "Bike efficiency · 45 min+ sessions")
+  ];
+  if (series.length >= 2) {
+    children.push(renderBikeEFChart(series));
+  } else {
+    children.push(h("p", {
+      class: "body-s",
+      style: "color: var(--ink-mute); text-align:center; margin: 8px 0"
+    }, "First qualifying session logged — trend appears next time."));
+  }
+  children.push(legend);
+
+  return h("div", { class: "card stack-sm ef-card" }, children);
+}
+
+/** Bar chart, one rect per session. The most recent bar is filled with the
+ *  brand accent so the eye lands on it. Earlier bars are brass (matching the
+ *  bike line in the cardio sparkline above) so the two charts read as the
+ *  same activity. */
+function renderBikeEFChart(series) {
+  const W = 320, H = 90, P_X = 8, P_TOP = 14, P_BOTTOM = 10;
+  const n = series.length;
+  const efs = series.map((s) => s.ef);
+  const eMax = Math.max(...efs, 0.1);
+
+  const availW = W - 2 * P_X;
+  const gap = n > 1 ? Math.min(3, availW * 0.04) : 0;
+  const barW = (availW - gap * Math.max(0, n - 1)) / Math.max(1, n);
+  const baseY = H - P_BOTTOM;
+
+  const yFor = (v) => P_TOP + (baseY - P_TOP) * (1 - v / eMax);
+  const xFor = (i) => P_X + i * (barW + gap);
+
+  const bars = series.map((s, i) => {
+    const y = yFor(s.ef);
+    const fill = i === n - 1 ? "var(--terracotta)" : "var(--brass)";
+    return `<rect x="${xFor(i).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(baseY - y).toFixed(1)}" fill="${fill}" rx="1.5"/>`;
+  }).join("");
+
+  // Faint reference line at the latest EF so the trend reads "above / below
+  // current" at a glance.
+  const latestY = yFor(efs[n - 1]);
+  const refLine = `<line x1="${P_X}" y1="${latestY.toFixed(1)}" x2="${(W - P_X).toFixed(1)}" y2="${latestY.toFixed(1)}" stroke="rgba(217,122,79,0.30)" stroke-dasharray="3 3"/>`;
+
+  const svg = `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" class="ef-chart" role="img" aria-label="Bike efficiency factor for the last ${n} qualifying sessions">
+      <line x1="${P_X}" y1="${baseY.toFixed(1)}" x2="${(W - P_X).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="rgba(15,35,64,0.10)"/>
+      ${refLine}
+      ${bars}
+    </svg>`;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = svg.trim();
+  return wrap.firstElementChild;
 }
 
 /** Two-line sparkline of swim distance + bike time. Returns null when the
