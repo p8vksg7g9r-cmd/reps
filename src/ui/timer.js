@@ -79,13 +79,21 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
+// Push the level past unity so the cue stays audible over music in earbuds.
+// beep.wav is normalized to ~0.95, so this drives the loud sections into mild
+// clipping at the output — deliberate, for an alarm that has to cut through.
+const BEEP_GAIN = 1.6;
+
 function playBuffer(buf) {
   const c = audioCtx;
   if (!c || !buf) return;
   try {
     const src = c.createBufferSource();
     src.buffer = buf;
-    src.connect(c.destination);
+    const gain = c.createGain();
+    gain.gain.value = BEEP_GAIN;
+    src.connect(gain);
+    gain.connect(c.destination);
     src.start();
   } catch {}
 }
