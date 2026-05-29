@@ -730,3 +730,42 @@ body.reps-entry-active .tabbar { display: none !important; }
   margin-top: var(--s2);
 }
 .ef-card .trend-legend { margin-top: var(--s2); }
+
+/* Portrait-only gate.
+   iOS Safari/standalone PWAs expose no screen.orientation.lock() and don't
+   honor the manifest "orientation":"portrait" reliably, so the only way to
+   keep the app portrait there is to cover it when the device is turned to
+   landscape. Scoped to touch devices (coarse pointer, no hover) so a desktop
+   browser window — which is permanently "landscape" — never triggers it. */
+#rotate-gate { display: none; }
+@media screen and (orientation: landscape) and (pointer: coarse) and (hover: none) {
+  #rotate-gate {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 1000;            /* above tab bar (100) and modal backdrop (200) */
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s3);
+    padding: max(24px, var(--safe-top)) 24px;
+    text-align: center;
+    background: var(--navy);
+    color: var(--paper);
+  }
+  #rotate-gate .rg-title {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 24px;
+  }
+  #rotate-gate .rg-sub {
+    font-family: var(--font-eyebrow);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(250, 246, 236, 0.65);
+  }
+  /* Freeze the app underneath so it can't be scrolled or tapped behind the gate. */
+  body { overflow: hidden; }
+}
