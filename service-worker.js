@@ -4,7 +4,7 @@
  * IndexedDB or other storage. User data — exercises, sessions, sets,
  * profile, weight log — lives in IndexedDB and survives every shell
  * update, cache bust, and SW reinstall. */
-const CACHE = "reps-v29";
+const CACHE = "reps-v30";
 const SHELL = [
   "./",
   "./index.html",
@@ -24,6 +24,7 @@ const SHELL = [
   "./src/domain/week.js",
   "./src/ui/timer.js",
   "./src/ui/timer-worker.js",
+  "./src/audio/beep.wav",
   "./src/ui/wake-lock.js",
   "./src/ui/tap-counter.js",
   "./src/ui/components.js",

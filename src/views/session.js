@@ -199,6 +199,26 @@ function makeCompletedLog({ unitLabel = "Set" } = {}) {
 function makeRepsPanel({ setType }) {
   const root = h("div", { class: "hidden" });
   let activeModal = null;
+  let restoreNavTimer = null;
+
+  // While the reps numpad is open, pull the bottom tab bar out of the layout
+  // entirely (CSS: body.reps-entry-active .tabbar { display:none }) so it can't
+  // be tapped during reps entry. The Save key sits directly over the Profile
+  // tab, and the press that closes the sheet would otherwise fall through onto
+  // it — so the bar is restored on a short delay, letting that trailing click
+  // land on nothing.
+  function hideNav() {
+    if (restoreNavTimer) { clearTimeout(restoreNavTimer); restoreNavTimer = null; }
+    document.body.classList.add("reps-entry-active");
+  }
+  function showNav({ immediate = false } = {}) {
+    if (restoreNavTimer) { clearTimeout(restoreNavTimer); restoreNavTimer = null; }
+    if (immediate) { document.body.classList.remove("reps-entry-active"); return; }
+    restoreNavTimer = setTimeout(() => {
+      document.body.classList.remove("reps-entry-active");
+      restoreNavTimer = null;
+    }, 400);
+  }
 
   function closeActive() {
     if (activeModal) {
@@ -209,6 +229,7 @@ function makeRepsPanel({ setType }) {
 
   function clear() {
     closeActive();
+    showNav({ immediate: true });
     root.classList.add("hidden");
     root.innerHTML = "";
   }
@@ -240,6 +261,7 @@ function makeRepsPanel({ setType }) {
         }
       });
 
+      hideNav();
       activeModal = modal([
         eyebrow(hint),
         field(label, np.el)
@@ -249,6 +271,7 @@ function makeRepsPanel({ setType }) {
           // because the next phase started. Either way the set ends up in
           // the end-of-exercise missing-reps modal.
           if (activeModal) activeModal = null;
+          showNav();
           resolve();
         }
       });
@@ -257,6 +280,7 @@ function makeRepsPanel({ setType }) {
 
   function showText(text) {
     closeActive();
+    showNav({ immediate: true });
     root.classList.remove("hidden");
     root.innerHTML = "";
     root.appendChild(h("div", { class: "card card-tight body-s", style: "color: var(--ink-mute); text-align:center" }, text));

@@ -1,23 +1,24 @@
-// Worker-backed interval engine + WebAudio cues.
+// Worker-backed interval engine + WAV audio cues.
 //
 // Timer authority lives in src/ui/timer-worker.js, which uses Date.now()
 // to stay accurate across foreground/background transitions. This module
 // is a thin main-thread wrapper that reacts to the worker's messages,
-// plays beeps via a single shared AudioContext, and exposes the same
+// plays a beep via a single shared AudioContext, and exposes the same
 // engine API the session view consumes.
 //
-// Audio cues:
-//   READY phase starts → soft single beep (520 Hz)
-//   WORK phase starts  → two short beeps  (880 Hz × 2)
-//   REST phase starts  → single short beep (660 Hz)
-//   Final phase ends   → three ascending tones (660 / 880 / 1100 Hz)
-//   Last 3 seconds of any phase → quiet tick beep
-//
-// All beeps are scheduled with AudioContext.currentTime + an offset, so the
-// sub-tones inside workStartBeep / exerciseEndBeep fire at deterministic
-// times regardless of main-thread responsiveness.
+// Audio cues: a single sound (src/audio/beep.wav) is used for everything —
+// every interval transition (ready/work/rest start and exercise end) plays
+// it once, and the final 5 seconds of each interval play it three times,
+// at 5s / 3s / 1s remaining. The WAV is fetched and decoded once into an
+// AudioBuffer, then replayed through a fresh BufferSource per cue, which
+// keeps latency low and works within the iOS user-gesture unlock model the
+// session view drives.
+
+const BEEP_URL = new URL("../audio/beep.wav", import.meta.url);
 
 let audioCtx = null;
+let beepBuffer = null;
+let beepLoad = null;
 
 function ensureCtx() {
   if (audioCtx) return audioCtx;
@@ -26,22 +27,40 @@ function ensureCtx() {
   return audioCtx;
 }
 
-/** Resume the AudioContext in response to a user gesture. iOS requires this
- *  before any sound will play. Returns a promise that resolves once the
- *  context is running, so callers can await before scheduling beeps.
- *  Plays a near-silent primer oscillator that helps unblock older WebKit. */
+// Fetch + decode the beep once. decodeAudioData is called with both the
+// promise and the legacy callback signatures so older WebKit (no promise
+// overload) still resolves. Returns null on any failure so callers no-op.
+function loadBeep() {
+  if (beepBuffer) return Promise.resolve(beepBuffer);
+  if (beepLoad) return beepLoad;
+  const c = ensureCtx();
+  if (!c) return Promise.resolve(null);
+  beepLoad = fetch(BEEP_URL)
+    .then((r) => r.arrayBuffer())
+    .then((data) => new Promise((resolve, reject) => {
+      const ret = c.decodeAudioData(data, resolve, reject);
+      if (ret && typeof ret.then === "function") ret.then(resolve, reject);
+    }))
+    .then((buf) => { beepBuffer = buf; return buf; })
+    .catch(() => null);
+  return beepLoad;
+}
+
+/** Resume the AudioContext in response to a user gesture and warm the beep
+ *  buffer. iOS requires the resume before any sound will play. Returns a
+ *  promise that resolves once the context is running, so callers can await
+ *  before the first cue. A silent one-frame buffer primer helps unblock
+ *  older WebKit without using an oscillator. */
 export function unlockAudio() {
   const c = ensureCtx();
   if (!c) return Promise.resolve();
+  loadBeep();
   try {
-    const osc = c.createOscillator();
-    const gain = c.createGain();
-    gain.gain.value = 0.00001;
-    osc.connect(gain);
-    gain.connect(c.destination);
-    const t = c.currentTime;
-    osc.start(t);
-    osc.stop(t + 0.02);
+    const silent = c.createBuffer(1, 1, c.sampleRate);
+    const src = c.createBufferSource();
+    src.buffer = silent;
+    src.connect(c.destination);
+    src.start(0);
   } catch {}
   if (c.state === "suspended" || c.state === "interrupted") {
     return c.resume().catch(() => {});
@@ -60,49 +79,26 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-function beep({ freq = 880, duration = 0.08, volume = 0.4, when = 0, type = "sine" } = {}) {
+function playBuffer(buf) {
+  const c = audioCtx;
+  if (!c || !buf) return;
+  try {
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.connect(c.destination);
+    src.start();
+  } catch {}
+}
+
+/** Play the beep. The same sound is used for every cue. If the buffer isn't
+ *  decoded yet (first cue racing the fetch) we load it then play once ready. */
+function playBeep() {
   const c = audioCtx;
   if (!c) return;
-  // Best-effort wake the context if a beep arrives mid-suspension.
+  // Best-effort wake the context if a cue arrives mid-suspension.
   if (c.state !== "running") c.resume().catch(() => {});
-  if (c.state !== "running") return;
-  const osc = c.createOscillator();
-  const gain = c.createGain();
-  osc.frequency.value = freq;
-  osc.type = type;
-  osc.connect(gain);
-  gain.connect(c.destination);
-  const t = c.currentTime + when;
-  // 5ms linear attack from silence avoids the click that comes from
-  // setValueAtTime jumping straight to a loud value.
-  gain.gain.setValueAtTime(0.00001, t);
-  gain.gain.linearRampToValueAtTime(volume, t + 0.005);
-  gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
-  osc.start(t);
-  osc.stop(t + duration + 0.02);
-}
-
-// Volumes are pushed to ~1.0 on the loud cues so beeps cut through music in
-// earbuds. The 5ms attack ramp keeps a unity-gain triangle from clicking, and
-// a single triangle/sine tone at gain=1.0 does not clip the destination stage.
-export function tickBeep()       { beep({ freq: 660,  duration: 0.06, volume: 0.55 }); }
-export function readyStartBeep() { beep({ freq: 520,  duration: 0.14, volume: 0.95, type: "triangle" }); }
-export function workStartBeep() {
-  beep({ freq: 880,  duration: 0.18, volume: 1.0, type: "triangle", when: 0.00 });
-  beep({ freq: 880,  duration: 0.18, volume: 1.0, type: "triangle", when: 0.22 });
-}
-export function restStartBeep()  { beep({ freq: 660,  duration: 0.22, volume: 1.0, type: "triangle" }); }
-export function exerciseEndBeep() {
-  beep({ freq: 660,  duration: 0.22, volume: 1.0, type: "triangle", when: 0.00 });
-  beep({ freq: 880,  duration: 0.22, volume: 1.0, type: "triangle", when: 0.24 });
-  beep({ freq: 1100, duration: 0.40, volume: 1.0, type: "triangle", when: 0.48 });
-}
-
-function transitionBeep(phase) {
-  if (!phase) return;
-  if (phase.kind === "work")       workStartBeep();
-  else if (phase.kind === "rest")  restStartBeep();
-  else if (phase.kind === "ready") readyStartBeep();
+  if (beepBuffer) { playBuffer(beepBuffer); return; }
+  loadBeep().then((buf) => { if (buf) playBuffer(buf); });
 }
 
 /**
@@ -125,13 +121,15 @@ export function makeIntervalEngine(phases) {
   worker.onmessage = (e) => {
     const m = e.data || {};
     if (m.type === "tick") {
-      if (m.remaining === 3 || m.remaining === 2 || m.remaining === 1) tickBeep();
+      // Countdown cue over the final 5 seconds of every interval: 5s, 3s, 1s
+      // remaining. The transition beep below fires the moment the interval ends.
+      if (m.remaining === 5 || m.remaining === 3 || m.remaining === 1) playBeep();
       emit(tickListeners, { remaining: m.remaining, phase: phases[m.phaseIdx], index: m.phaseIdx });
     } else if (m.type === "phase") {
-      transitionBeep(phases[m.phaseIdx]);
+      playBeep();
       emit(phaseListeners, { phase: phases[m.phaseIdx], index: m.phaseIdx, remaining: m.remaining });
     } else if (m.type === "done") {
-      exerciseEndBeep();
+      playBeep();
       emit(doneListeners);
     }
   };
